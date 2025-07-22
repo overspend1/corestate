@@ -5,17 +5,6 @@ on:
   push:
     tags:
       - 'v2.*'
-  workflow_dispatch:
-    inputs:
-      release_type:
-        description: 'Release type'
-        required: true
-        default: 'stable'
-        type: choice
-        options:
-          - stable
-          - beta
-          - canary
 
 env:
   DOCKER_REGISTRY: ghcr.io
