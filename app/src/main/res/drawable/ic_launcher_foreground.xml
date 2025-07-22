@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    
+    <!-- CoreState Logo - Database/Backup icon -->
+    <group android:scaleX="0.8"
+           android:scaleY="0.8"
+           android:pivotX="54"
+           android:pivotY="54">
+        
+        <!-- Database cylinders -->
+        <path android:fillColor="#FFFFFF"
+              android:pathData="M54,25c-12,0 -22,4 -22,9v6c0,5 10,9 22,9s22,-4 22,-9v-6c0,-5 -10,-9 -22,-9z"/>
+        
+        <path android:fillColor="#E1F5FE"
+              android:pathData="M54,40c-12,0 -22,-4 -22,-9v6c0,5 10,9 22,9s22,-4 22,-9v-6c0,5 -10,9 -22,9z"/>
+        
+        <path android:fillColor="#FFFFFF"
+              android:pathData="M54,45c-12,0 -22,4 -22,9v6c0,5 10,9 22,9s22,-4 22,-9v-6c0,-5 -10,-9 -22,-9z"/>
+        
+        <path android:fillColor="#E1F5FE"
+              android:pathData="M54,60c-12,0 -22,-4 -22,-9v6c0,5 10,9 22,9s22,-4 22,-9v-6c0,5 -10,9 -22,9z"/>
+        
+        <!-- Backup arrow -->
+        <path android:fillColor="#4CAF50"
+              android:strokeColor="#FFFFFF"
+              android:strokeWidth="2"
+              android:pathData="M74,35 L74,50 L82,42 M74,50 L66,42"/>
+        
+    </group>
+    
+</vector>
