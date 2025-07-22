@@ -105,10 +105,12 @@ jobs:
       - name: Build component
         run: echo "Skipping build for now: ${{ matrix.build-command }}"
       
-      - name: Upload artifacts
+      - name: Create Placeholder Artifact
         run: |
           mkdir -p ${{ matrix.artifact-path }}
           touch ${{ matrix.artifact-path }}/placeholder.txt
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.component }}-${{ github.sha }}
