@@ -1,0 +1,51 @@
+syntax = "proto3";
+
+package corestate.v2.storage;
+
+option java_package = "com.corestate.v2.proto.storage";
+option java_multiple_files = true;
+
+// Represents a single data or parity shard
+message Shard {
+  uint32 index = 1;
+  bytes data = 2;
+  bytes checksum = 3; // Blake3 checksum
+  enum ShardType {
+    DATA = 0;
+    PARITY = 1;
+  }
+  ShardType type = 4;
+}
+
+// Request to encode a block of data into shards
+message EncodeRequest {
+  bytes data = 1;
+  uint32 data_shards = 2;
+  uint32 parity_shards = 3;
+}
+
+// Response containing the generated shards
+message EncodeResponse {
+  repeated Shard shards = 1;
+}
+
+// Request to reconstruct data from available shards
+message ReconstructRequest {
+  repeated Shard shards = 1; // Include all available shards, even if empty
+  uint32 data_shards = 2;
+  uint32 parity_shards = 3;
+}
+
+// Response containing the reconstructed data
+message ReconstructResponse {
+  bytes data = 1;
+}
+
+// The Storage Hardware Abstraction Layer service
+service StorageHAL {
+  // Encodes a block of data using Reed-Solomon erasure coding
+  rpc Encode(EncodeRequest) returns (EncodeResponse);
+
+  // Reconstructs a block of data from its shards
+  rpc Reconstruct(ReconstructRequest) returns (ReconstructResponse);
+}

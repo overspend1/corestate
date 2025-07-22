@@ -1,14 +1,13 @@
-# ml-optimizer/models/backup_predictor.py
-# Note: Correcting path to ml/models as per new structure
 import tensorflow as tf
-# from tensorflow.keras import layers, models # Correct import path might vary
+from tensorflow.keras import layers, models
 import numpy as np
 
-# Placeholder for FeatureExtractor
 class FeatureExtractor:
     def extract(self, user_patterns, system_load):
-        # This should create a feature vector of shape (None, 168, 15)
-        return np.random.rand(1, 168, 15)
+        # In a real scenario, this would process real data.
+        # For now, we return a correctly shaped random tensor.
+        print("Extracting features from user patterns and system load...")
+        return np.random.rand(1, 168, 15).astype(np.float32)
 
 class BackupPredictor:
     def __init__(self):
@@ -17,29 +16,32 @@ class BackupPredictor:
     
     def _build_model(self):
         """LSTM-based model for predicting optimal backup times"""
-        # Using tf.keras submodule
-        model = tf.keras.models.Sequential([
-            tf.keras.layers.LSTM(128, return_sequences=True, input_shape=(168, 15)),  # Week of hourly data
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.LSTM(64, return_sequences=True),
-            tf.keras.layers.Dropout(0.2),
-            tf.keras.layers.LSTM(32),
-            tf.keras.layers.Dense(64, activation='relu'),
-            tf.keras.layers.Dense(24, activation='sigmoid')  # 24-hour prediction
+        print("Building LSTM model for backup prediction...")
+        model = models.Sequential([
+            layers.LSTM(128, return_sequences=True, input_shape=(168, 15)),
+            layers.Dropout(0.2),
+            layers.LSTM(64, return_sequences=True),
+            layers.Dropout(0.2),
+            layers.LSTM(32),
+            layers.Dense(64, activation='relu'),
+            layers.Dense(24, activation='sigmoid')
         ])
         
         model.compile(
             optimizer='adam',
             loss='binary_crossentropy',
-            metrics=['accuracy', 'precision', 'recall']
+            metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()]
         )
+        print("Model compiled successfully.")
         return model
     
     def _post_process_predictions(self, predictions):
-        # Placeholder for post-processing logic
-        return {"processed_predictions": predictions.tolist()}
+        # Example: Return hours where prediction > 0.7
+        optimal_hours = np.where(predictions[0] > 0.7)[0]
+        return {"optimal_hours": optimal_hours.tolist(), "raw_predictions": predictions.tolist()}
 
     def predict_optimal_backup_windows(self, user_patterns, system_load):
         features = self.feature_extractor.extract(user_patterns, system_load)
+        print("Predicting optimal backup windows...")
         predictions = self.model.predict(features)
         return self._post_process_predictions(predictions)
