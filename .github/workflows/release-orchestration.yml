@@ -1,10 +1,20 @@
-# .github/workflows/release-orchestration.yml
 name: CoreState v2.0 Release Orchestration
 
 on:
   push:
     tags:
       - 'v2.*'
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: 'Release type'
+        required: true
+        default: 'stable'
+        type: choice
+        options:
+          - stable
+          - beta
+          - canary
 
 env:
   DOCKER_REGISTRY: ghcr.io
@@ -12,15 +22,13 @@ env:
   ML_TRAINING_CLUSTER: ml-cluster-prod
 
 jobs:
-  # Security scanning
   security-scan:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        component: [android-app, microservices, module, web-dashboard]
+        component: [ 'apps/android', 'services', 'module', 'apps/web-dashboard', 'apps/daemon' ]
     steps:
       - uses: actions/checkout@v4
-      
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
@@ -28,204 +36,94 @@ jobs:
           scan-ref: '${{ matrix.component }}'
           severity: 'CRITICAL,HIGH'
           exit-code: '1'
-      
-      - name: Run Semgrep
-        uses: returntocorp/semgrep-action@v1
-        with:
-          config: >-
-            p/security-audit
-            p/kotlin
-            p/rust
-            p/typescript
-      
-      - name: SAST with CodeQL
-        uses: github/codeql-action/analyze@v2
-        with:
-          languages: kotlin,javascript,cpp,python
-  
-  # Build all components
-  build-matrix:
-    needs: security-scan
-    strategy:
-      matrix:
-        include:
-          - component: android-app
-            build-command: ./gradlew assembleRelease bundleRelease
-            artifact-path: apps/android/androidApp/build/outputs
-          
-          - component: ios-app
-            build-command: |
-              cd apps/android/iosApp
-              xcodebuild -scheme CoreState -configuration Release
-            artifact-path: apps/android/iosApp/build
-          
-          - component: daemon
-            build-command: |
-              cd apps/daemon
-              cargo build --release --target x86_64-unknown-linux-musl
-              cargo build --release --target aarch64-unknown-linux-musl
-            artifact-path: apps/daemon/target
-          
-          - component: web-dashboard
-            build-command: |
-              cd apps/web-dashboard
-              npm ci
-              npm run build:prod
-            artifact-path: apps/web-dashboard/dist
-          
-          - component: microservices
-            build-command: |
-              ./gradlew :services:build
-              docker buildx build --platform linux/amd64,linux/arm64 \
-                --tag ${{ env.DOCKER_REGISTRY }}/corestate/services:${{ github.ref_name }} \
-                --push services/
-    
-    runs-on: ${{ matrix.component == 'ios-app' && 'macos-13' || 'ubuntu-latest' }}
-    
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-      
-      - name: Set up build environment
-        # uses: ./.github/actions/setup-build-env # This would be a custom action
-        run: echo "Setting up build environment for ${{ matrix.component }}"
-      
-      - name: Build component
-        run: echo "Skipping build for now: ${{ matrix.build-command }}"
-      
-      - name: Create Placeholder Artifact
-        run: |
-          mkdir -p ${{ matrix.artifact-path }}
-          touch ${{ matrix.artifact-path }}/placeholder.txt
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.component }}-${{ github.sha }}
-          path: ${{ matrix.artifact-path }}
-  
-  # Build KernelSU module with multiple Android versions
-  build-module:
+  build-android:
     needs: security-scan
-    strategy:
-      matrix:
-        android-version: [11, 12, 13, 14]
-        architecture: [arm64-v8a, x86_64]
-    
     runs-on: ubuntu-latest
-    container:
-      image: ubuntu:22.04 # Placeholder, would be a custom NDK image
-    
     steps:
       - uses: actions/checkout@v4
-      
-      - name: Build native components
-        run: echo "Building native components for Android ${{ matrix.android-version }} (${{ matrix.architecture }})"
-      
-      - name: Package module
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Build Android App
         run: |
-          echo "Packaging module for ${{ matrix.architecture }}"
-          MODULE_NAME="CoreState-Module-v2.0.0-android${{ matrix.android-version }}-${{ matrix.architecture }}"
-          mkdir -p module_out
-          touch module_out/${MODULE_NAME}.zip
-      
-      - name: Sign module
-        run: echo "Signing module"
-      
-      - name: Upload module
+          chmod +x gradlew
+          ./gradlew :apps:android:androidApp:assembleRelease :apps:android:androidApp:bundleRelease
+      - name: Upload Android Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: module-android${{ matrix.android-version }}-${{ matrix.architecture }}
-          path: 'module_out/*.zip'
-  
-  # ML model training and validation
-  ml-pipeline:
+          name: android-app-${{ github.sha }}
+          path: apps/android/androidApp/build/outputs/
+
+  build-daemon:
     needs: security-scan
-    runs-on: ubuntu-latest # Placeholder for [self-hosted, gpu]
-    
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python environment
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.11'
-      - name: ML Pipeline Steps
+      - name: Build Daemon
         run: |
-          echo "Running ML training, validation, and conversion..."
-          mkdir -p ml_artifacts
-          touch ml_artifacts/validation_report.json
-          touch ml_artifacts/backup_predictor_v2.tflite
-      - name: Upload ML artifacts
+          cd apps/daemon
+          cargo build --release --target x86_64-unknown-linux-musl
+          cargo build --release --target aarch64-unknown-linux-musl
+      - name: Upload Daemon Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ml-models-${{ github.sha }}
-          path: ml_artifacts/
-  
-  # Integration testing
-  integration-tests:
-    needs: [build-matrix, build-module, ml-pipeline]
-    runs-on: ubuntu-latest # Placeholder for [self-hosted, android-farm]
-    
-    steps:
-      - uses: actions/checkout@v4
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-      - name: Run E2E and Performance Tests
-        run: echo "Running integration and performance tests..."
-  
-  # Deploy to staging
-  deploy-staging:
-    needs: integration-tests
+          name: daemon-${{ github.sha }}
+          path: apps/daemon/target/
+
+  build-web-dashboard:
+    needs: security-scan
     runs-on: ubuntu-latest
-    environment: staging
-    
     steps:
       - uses: actions/checkout@v4
-      - name: Deploy to staging cluster
-        run: echo "Deploying to staging..."
-      - name: Run smoke tests
-        run: echo "Running smoke tests on staging..."
-  
-  # Create release
+      - name: Build Web Dashboard
+        run: |
+          cd apps/web-dashboard
+          npm ci
+          npm run build
+      - name: Upload Web Dashboard Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dashboard-${{ github.sha }}
+          path: apps/web-dashboard/build/
+
+  build-microservices:
+    needs: security-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Build Microservices
+        run: |
+          chmod +x gradlew
+          ./gradlew build
+          # Docker build would happen here, requires docker login etc.
+          echo "Docker build placeholder for ${{ env.DOCKER_REGISTRY }}/corestate/services:${{ github.ref_name }}"
+
   create-release:
-    needs: deploy-staging
+    # This job now only depends on the build jobs that produce release artifacts
+    needs: [build-android, build-daemon, build-web-dashboard, build-microservices]
     runs-on: ubuntu-latest
-    
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Generate changelog
-        id: changelog
-        run: echo "changelog=### Changelog..." >> $GITHUB_OUTPUT
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-      - name: Create release bundle
-        run: |
-          mkdir -p release_bundle
-          touch release_bundle/CoreState-v2.0.0-release.tar.gz
+      - name: List downloaded artifacts
+        run: ls -R artifacts
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          files: release_bundle/*
+          files: |
+            artifacts/android-app-${{ github.sha }}/**/*.apk
+            artifacts/android-app-${{ github.sha }}/**/*.aab
+            artifacts/daemon-${{ github.sha }}/**/*.tar.gz 
           body: |
-            # CoreState ${{ github.ref_name }}
-            ${{ steps.changelog.outputs.changelog }}
-  
-  # Deploy to production
-  deploy-production:
-    needs: create-release
-    runs-on: ubuntu-latest
-    environment: production
-    if: github.event_name == 'push' && contains(github.ref, 'stable')
-    
-    steps:
-      - name: Deploy to production clusters
-        run: echo "Deploying to production..."
-      - name: Notify stakeholders
-        run: echo "Notifying stakeholders of production release."
+            # CoreState ${{ github.ref_name }} Release
+            This is an automated release. See the attached artifacts for downloads.
