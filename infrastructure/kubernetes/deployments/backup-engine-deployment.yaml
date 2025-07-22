@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backup-engine
+  labels:
+    app: backup-engine
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: backup-engine
+  template:
+    metadata:
+      labels:
+        app: backup-engine
+    spec:
+      containers:
+      - name: backup-engine
+        image: ghcr.io/corestate/backup-engine:latest # Image will be updated by CI/CD
+        ports:
+        - containerPort: 8080

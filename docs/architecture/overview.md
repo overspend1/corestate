@@ -1,0 +1,1 @@
+# CoreState v2.0 Architecture Overview

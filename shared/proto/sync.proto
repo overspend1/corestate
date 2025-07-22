@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package corestate.v2.sync;
+
+option java_package = "com.corestate.v2.proto.sync";
+option java_multiple_files = true;
+
+// CRDT-based state for a file
+message FileVersion {
+  string path = 1;
+  int64 version = 2; // Lamport timestamp
+  int64 timestamp = 3; // Wall clock time
+  string checksum = 4;
+  string node_id = 5;
+}
+
+// Represents the sync state of a device
+message SyncState {
+  string node_id = 1;
+  map<string, FileVersion> file_versions = 2; // LWW-Register Set
+  repeated string deleted_files = 3; // OR-Set
+}
+
+service SyncService {
+  // P2P sync between devices
+  rpc SyncWithPeer(stream SyncState) returns (stream SyncState);
+}

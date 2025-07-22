@@ -1,0 +1,11 @@
+# This file designates default owners for different parts of the codebase.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+* @YourGitHubUsername
+
+/apps/android/ @android-team
+/apps/web-dashboard/ @web-team
+/services/ @backend-team
+/module/ @kernel-team
+/ml/ @ml-team
+/infrastructure/ @devops-team

@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package corestate.v2.analytics;
+
+option java_package = "com.corestate.v2.proto.analytics";
+option java_multiple_files = true;
+
+// An event to be logged for analytics
+message BackupEvent {
+  string event_id = 1;
+  int64 timestamp = 2;
+  string device_id = 3;
+  string tenant_id = 4;
+  string user_id = 5;
+
+  oneof event_payload {
+    BackupStarted started = 6;
+    BackupCompleted completed = 7;
+    BackupFailed failed = 8;
+  }
+}
+
+message BackupStarted {
+  string backup_id = 1;
+  string backup_type = 2;
+}
+
+message BackupCompleted {
+  string backup_id = 1;
+  int64 final_size_bytes = 2;
+  int64 duration_seconds = 3;
+  int32 file_count = 4;
+  double deduplication_ratio = 5;
+  double compression_ratio = 6;
+}
+
+message BackupFailed {
+  string backup_id = 1;
+  string error_code = 2;
+  string error_message = 3;
+}
+
+service AnalyticsService {
+  // Fire-and-forget event logging
+  rpc LogEvent(BackupEvent) returns (LogEventResponse);
+}
+
+message LogEventResponse {
+  bool acknowledged = 1;
+}

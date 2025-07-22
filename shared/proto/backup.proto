@@ -1,0 +1,64 @@
+syntax = "proto3";
+
+package corestate.v2.backup;
+
+option java_package = "com.corestate.v2.proto.backup";
+option java_multiple_files = true;
+
+// Represents a single chunk of a file
+message DataChunk {
+  string chunk_id = 1; // Blake3 hash of the content
+  bytes data = 2;
+}
+
+// Metadata for a single file in a backup
+message FileMetadata {
+  string path = 1;
+  int64 size = 2;
+  int64 modified_time = 3;
+  string checksum = 4; // Blake3 checksum of the full file
+  repeated string chunk_ids = 5;
+}
+
+// A complete backup manifest
+message BackupManifest {
+  string backup_id = 1;
+  int64 timestamp = 2;
+  enum BackupType {
+    FULL = 0;
+    INCREMENTAL = 1;
+    SYNTHETIC_FULL = 2;
+  }
+  BackupType type = 3;
+  repeated FileMetadata files = 4;
+}
+
+service BackupService {
+  rpc StartBackup(StartBackupRequest) returns (StartBackupResponse);
+  rpc UploadChunk(stream DataChunk) returns (UploadChunkResponse);
+  rpc FinishBackup(FinishBackupRequest) returns (FinishBackupResponse);
+}
+
+message StartBackupRequest {
+  BackupManifest.BackupType type = 1;
+  string device_id = 2;
+}
+
+message StartBackupResponse {
+  string backup_id = 1;
+  string upload_token = 2;
+}
+
+message UploadChunkResponse {
+  string chunk_id = 1;
+  bool success = 2;
+}
+
+message FinishBackupRequest {
+  string backup_id = 1;
+  BackupManifest manifest = 2;
+}
+
+message FinishBackupResponse {
+  bool success = 1;
+}
