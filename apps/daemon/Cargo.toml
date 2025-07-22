@@ -7,3 +7,6 @@ edition = "2021"
 
 [dependencies]
 # Dependencies will be added later
+[[bin]]
+name = "corestate-daemon"
+path = "src/main.rs"
