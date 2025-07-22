@@ -81,7 +81,7 @@ jobs:
       - name: Build Web Dashboard
         run: |
           cd apps/web-dashboard
-          npm ci
+          npm install
           npm run build
       - name: Upload Web Dashboard Artifacts
         uses: actions/upload-artifact@v4
