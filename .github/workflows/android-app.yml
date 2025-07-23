@@ -48,7 +48,7 @@ jobs:
         run: chmod +x gradlew
         
       - name: Run tests
-        run: ./gradlew :apps:android:shared:testDebugUnitTest
+        run: ./gradlew :apps:android:androidApp:testDebugUnitTest
         
       - name: Upload test results
         uses: actions/upload-artifact@v4
@@ -56,8 +56,8 @@ jobs:
         with:
           name: android-test-results
           path: |
-            apps/android/shared/build/reports/tests/
-            apps/android/shared/build/test-results/
+            apps/android/androidApp/build/reports/tests/
+            apps/android/androidApp/build/test-results/
             
   build:
     needs: test

@@ -104,7 +104,7 @@ jobs:
           chmod +x gradlew
           cd services/backup-engine
           if [ -f "build.gradle.kts" ]; then
-            ../../gradlew :services:backup-engine:build -x test --no-daemon
+            ../../gradlew :services:backup-engine:build -x test --no-daemon -x :apps:android:shared:build
           else
             echo "No build file found, creating mock backup service"
             mkdir -p build

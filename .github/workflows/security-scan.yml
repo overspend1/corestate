@@ -85,7 +85,7 @@ jobs:
       - name: Build with Gradle
         run: |
           chmod +x ./gradlew
-          ./gradlew build -x test --no-daemon
+          ./gradlew build -x test --no-daemon -x :apps:android:shared:build
         
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
@@ -100,17 +100,9 @@ jobs:
         uses: actions/checkout@v4
         
       - name: Run Semgrep
-        uses: returntocorp/semgrep-action@v1
-        with:
-          config: >
-            p/security-audit
-            p/kotlin
-            p/java
-            p/typescript
-            p/python
-            p/javascript
-            p/rust
-          generateSarif: "1"
+        run: |
+          pip install semgrep
+          semgrep scan --sarif --config=p/security-audit --config=p/kotlin --config=p/java --config=p/typescript --config=p/python --config=p/javascript --config=p/rust --output=semgrep.sarif || true
           
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3

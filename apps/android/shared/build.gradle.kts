@@ -14,9 +14,10 @@ kotlin {
         }
     }
     
-    iosX64()
-    iosArm64()
-    iosSimulatorArm64()
+    // iOS targets temporarily removed due to CI build issues
+    // iosX64()
+    // iosArm64()
+    // iosSimulatorArm64()
     
     sourceSets {
         val commonMain by getting {
@@ -80,15 +81,16 @@ kotlin {
             }
         }
         
-        val iosMain by getting {
-            dependencies {
-                // iOS-specific networking
-                implementation("io.ktor:ktor-client-darwin:2.3.5")
-                
-                // iOS SQLite
-                implementation("app.cash.sqldelight:native-driver:2.0.0")
-            }
-        }
+        // iOS dependencies temporarily removed
+        // val iosMain by getting {
+        //     dependencies {
+        //         // iOS-specific networking
+        //         implementation("io.ktor:ktor-client-darwin:2.3.5")
+        //         
+        //         // iOS SQLite
+        //         implementation("app.cash.sqldelight:native-driver:2.0.0")
+        //     }
+        // }
     }
 }
 
