@@ -10,6 +10,10 @@ on:
     - cron: '0 2 * * *'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  security-events: write
+
 jobs:
   dependency-scan:
     runs-on: ubuntu-latest
@@ -92,13 +96,12 @@ jobs:
         with:
           config: >
             p/security-audit
-            p/owasp-top-10
             p/kotlin
             p/java
             p/typescript
             p/python
+            p/javascript
             p/rust
-            p/cpp
           generateSarif: "1"
           
       - name: Upload SARIF file

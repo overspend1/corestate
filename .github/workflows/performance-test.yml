@@ -95,6 +95,7 @@ jobs:
           
       - name: Build backup service
         run: |
+          chmod +x gradlew
           cd services/backup-engine
           if [ -f "build.gradle.kts" ]; then
             ../../gradlew build

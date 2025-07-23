@@ -5,12 +5,18 @@ on:
     branches: [ main, develop ]
     paths:
       - 'apps/android/**'
-      - 'shared/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradlew'
+      - 'gradle/**'
   pull_request:
     branches: [ main ]
     paths:
       - 'apps/android/**'
-      - 'shared/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradlew'
+      - 'gradle/**'
 
 env:
   GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2048m -Dorg.gradle.daemon=false"
