@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        component: [ 'apps/android', 'services', 'module', 'apps/web-dashboard', 'apps/daemon' ]
+        component: [ 'apps/android', 'services', 'module', 'apps/daemon' ]
     steps:
       - uses: actions/checkout@v4
       - name: Run Trivy vulnerability scanner
@@ -77,21 +77,24 @@ jobs:
           name: daemon-${{ github.sha }}
           path: apps/daemon/target/
 
-  build-web-dashboard:
+  build-kernelsu-module:
     needs: security-scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build Web Dashboard
+      - name: Set up Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r25c
+      - name: Build KernelSU Module
         run: |
-          cd apps/web-dashboard
-          npm install
-          npm run build
-      - name: Upload Web Dashboard Artifacts
+          cd module
+          zip -r corestate-kernelsu-module-v2.0.0.zip . -x "*.git*" "*.gradle*"
+      - name: Upload KernelSU Module
         uses: actions/upload-artifact@v4
         with:
-          name: web-dashboard-${{ github.sha }}
-          path: apps/web-dashboard/build/
+          name: kernelsu-module-${{ github.sha }}
+          path: module/corestate-kernelsu-module-v2.0.0.zip
 
   build-microservices:
     needs: security-scan
@@ -112,7 +115,7 @@ jobs:
 
   create-release:
     # This job now only depends on the build jobs that produce release artifacts
-    needs: [build-android, build-daemon, build-web-dashboard, build-microservices]
+    needs: [build-android, build-daemon, build-kernelsu-module, build-microservices]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
@@ -127,7 +130,21 @@ jobs:
           files: |
             artifacts/android-app-${{ github.sha }}/**/*.apk
             artifacts/android-app-${{ github.sha }}/**/*.aab
+            artifacts/kernelsu-module-${{ github.sha }}/*.zip
             artifacts/daemon-${{ github.sha }}/**/*.tar.gz 
           body: |
             # CoreState ${{ github.ref_name }} Release
-            This is an automated release. See the attached artifacts for downloads.
+            
+            **CoreState v2.0** - Advanced backup and synchronization system by **Wiktor/overspend1**
+            
+            ## Downloads
+            - **CoreState.apk** - Android application  
+            - **corestate-kernelsu-module-v2.0.0.zip** - KernelSU module for system integration
+            - **corestate-daemon** - Linux daemon (x86_64 & aarch64)
+            
+            ## Installation
+            1. Install the Android APK
+            2. Flash the KernelSU module via KernelSU Manager
+            3. Deploy daemon on your server/NAS
+            
+            **Author:** Wiktor/overspend1
