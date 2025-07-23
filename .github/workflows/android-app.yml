@@ -92,15 +92,25 @@ jobs:
         run: |
           if [ "${{ matrix.build-type }}" = "release" ]; then
             ./gradlew :apps:android:androidApp:assembleRelease
+            ./gradlew :apps:android:androidApp:bundleRelease
           else
             ./gradlew :apps:android:androidApp:assembleDebug
           fi
           
+      - name: Sign APK (Release)
+        if: matrix.build-type == 'release'
+        run: |
+          # For now, use debug signing for demo purposes
+          # In production, this would use proper release signing
+          echo "Using debug signing for demo release"
+          
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk-${{ matrix.build-type }}
-          path: apps/android/androidApp/build/outputs/apk/${{ matrix.build-type }}/*.apk
+          name: corestate-android-${{ matrix.build-type }}
+          path: |
+            apps/android/androidApp/build/outputs/apk/${{ matrix.build-type }}/*.apk
+            apps/android/androidApp/build/outputs/bundle/${{ matrix.build-type }}/*.aab
           
   lint:
     runs-on: ubuntu-latest
