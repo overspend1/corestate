@@ -1,0 +1,217 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storage-hal
+  namespace: corestate
+  labels:
+    app: storage-hal
+    component: storage
+    version: v2.0.0
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: storage-hal
+  template:
+    metadata:
+      labels:
+        app: storage-hal
+        component: storage
+        version: v2.0.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8081"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: storage-hal
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+      containers:
+      - name: storage-hal
+        image: ghcr.io/corestate/storage-hal:latest
+        imagePullPolicy: Always
+        ports:
+        - name: grpc
+          containerPort: 8081
+          protocol: TCP
+        - name: metrics
+          containerPort: 9091
+          protocol: TCP
+        env:
+        - name: RUST_LOG
+          value: "storage_hal=info,tower=warn"
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: storage-hal-secrets
+              key: aws-access-key-id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: storage-hal-secrets
+              key: aws-secret-access-key
+        - name: AZURE_STORAGE_ACCOUNT
+          valueFrom:
+            secretKeyRef:
+              name: storage-hal-secrets
+              key: azure-storage-account
+        - name: AZURE_STORAGE_KEY
+          valueFrom:
+            secretKeyRef:
+              name: storage-hal-secrets
+              key: azure-storage-key
+        - name: GCP_CREDENTIALS
+          valueFrom:
+            secretKeyRef:
+              name: storage-hal-secrets
+              key: gcp-credentials
+        livenessProbe:
+          exec:
+            command:
+            - /app/storage-hal
+            - --health-check
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - /app/storage-hal
+            - --health-check
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: temp-storage
+          mountPath: /tmp
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: config
+        configMap:
+          name: storage-hal-config
+      - name: temp-storage
+        emptyDir:
+          sizeLimit: 500Mi
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - storage-hal
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: storage-hal-svc
+  namespace: corestate
+  labels:
+    app: storage-hal
+    component: storage
+spec:
+  selector:
+    app: storage-hal
+  ports:
+  - name: grpc
+    protocol: TCP
+    port: 8081
+    targetPort: 8081
+  - name: metrics
+    protocol: TCP
+    port: 9091
+    targetPort: 9091
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: storage-hal
+  namespace: corestate
+  labels:
+    app: storage-hal
+    component: storage
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/storage-hal-role
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: storage-hal-config
+  namespace: corestate
+  labels:
+    app: storage-hal
+    component: storage
+data:
+  config.toml: |
+    [server]
+    host = "0.0.0.0"
+    port = 8081
+    
+    [storage]
+    default_backend = "aws"
+    erasure_coding_enabled = true
+    encryption_enabled = true
+    
+    [aws]
+    region = "us-east-1"
+    bucket_name = "corestate-backups"
+    
+    [azure]
+    container_name = "corestate-backups"
+    
+    [gcp]
+    bucket_name = "corestate-backups"
+    project_id = "corestate-project"
+    
+    [metrics]
+    enabled = true
+    port = 9091
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: storage-hal-secrets
+  namespace: corestate
+  labels:
+    app: storage-hal
+    component: storage
+type: Opaque
+stringData:
+  aws-access-key-id: "PLACEHOLDER_ACCESS_KEY"
+  aws-secret-access-key: "PLACEHOLDER_SECRET_KEY"
+  azure-storage-account: "PLACEHOLDER_ACCOUNT"
+  azure-storage-key: "PLACEHOLDER_KEY"
+  gcp-credentials: |
+    {
+      "type": "service_account",
+      "project_id": "corestate-project"
+    }

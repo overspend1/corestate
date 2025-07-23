@@ -1,0 +1,206 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ml-optimizer
+  namespace: corestate
+  labels:
+    app: ml-optimizer
+    component: ml
+    version: v2.0.0
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate  # ML models might need to be loaded sequentially
+  selector:
+    matchLabels:
+      app: ml-optimizer
+  template:
+    metadata:
+      labels:
+        app: ml-optimizer
+        component: ml
+        version: v2.0.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8082"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: ml-optimizer
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
+      containers:
+      - name: ml-optimizer
+        image: ghcr.io/corestate/ml-optimizer:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8082
+          protocol: TCP
+        env:
+        - name: PYTHONPATH
+          value: "/app"
+        - name: MODEL_PATH
+          value: "/app/models"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: ml-optimizer-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: ml-optimizer-secrets
+              key: redis-url
+        - name: MLFLOW_TRACKING_URI
+          valueFrom:
+            configMapKeyRef:
+              name: ml-optimizer-config
+              key: mlflow-uri
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        volumeMounts:
+        - name: models
+          mountPath: /app/models
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: temp-storage
+          mountPath: /tmp
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: models
+        persistentVolumeClaim:
+          claimName: ml-models-pvc
+      - name: config
+        configMap:
+          name: ml-optimizer-config
+      - name: temp-storage
+        emptyDir:
+          sizeLimit: 2Gi
+      nodeSelector:
+        node-type: ml-optimized  # Schedule on ML-optimized nodes if available
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ml-optimizer-svc
+  namespace: corestate
+  labels:
+    app: ml-optimizer
+    component: ml
+spec:
+  selector:
+    app: ml-optimizer
+  ports:
+  - name: http
+    protocol: TCP
+    port: 8082
+    targetPort: 8082
+  type: ClusterIP
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ml-optimizer
+  namespace: corestate
+  labels:
+    app: ml-optimizer
+    component: ml
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ml-optimizer-config
+  namespace: corestate
+  labels:
+    app: ml-optimizer
+    component: ml
+data:
+  config.yaml: |
+    server:
+      host: "0.0.0.0"
+      port: 8082
+      workers: 4
+    
+    models:
+      anomaly_detection:
+        enabled: true
+        retrain_interval: "24h"
+        threshold: 0.8
+      
+      backup_prediction:
+        enabled: true
+        retrain_interval: "168h"  # Weekly
+        prediction_horizon: "24h"
+      
+      optimization:
+        enabled: true
+        update_interval: "1h"
+    
+    training:
+      batch_size: 1000
+      max_epochs: 100
+      early_stopping_patience: 10
+    
+    logging:
+      level: INFO
+      format: json
+  
+  mlflow-uri: "http://mlflow:5000"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ml-optimizer-secrets
+  namespace: corestate
+  labels:
+    app: ml-optimizer
+    component: ml
+type: Opaque
+stringData:
+  database-url: "postgresql://ml_user:password@postgres:5432/ml_db"
+  redis-url: "redis://redis:6379/1"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ml-models-pvc
+  namespace: corestate
+  labels:
+    app: ml-optimizer
+    component: ml
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: gp3

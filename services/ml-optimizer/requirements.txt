@@ -1,6 +1,84 @@
-fastapi
-uvicorn
-tensorflow
-scikit-learn
-pandas
-numpy
+# Core ML and data science libraries
+scikit-learn==1.3.2
+pandas==2.1.3
+numpy==1.24.4
+scipy==1.11.4
+
+# Deep learning
+tensorflow==2.14.0
+torch==2.1.1
+torchvision==0.16.1
+
+# Data visualization
+matplotlib==3.8.2
+seaborn==0.13.0
+plotly==5.17.0
+
+# Model persistence and job management
+joblib==1.3.2
+pickle5==0.0.11
+
+# Data processing
+pyarrow==14.0.1
+fastparquet==2023.10.1
+openpyxl==3.1.2
+
+# API and web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+pydantic==2.5.0
+
+# Database connectivity
+psycopg2-binary==2.9.9
+redis==5.0.1
+sqlalchemy==2.0.23
+
+# gRPC support
+grpcio==1.59.3
+grpcio-tools==1.59.3
+protobuf==4.25.1
+
+# Monitoring and logging
+prometheus-client==0.19.0
+structlog==23.2.0
+
+# Configuration and environment
+python-dotenv==1.0.0
+pyyaml==6.0.1
+toml==0.10.2
+
+# Time series analysis
+statsmodels==0.14.0
+tslearn==0.6.2
+
+# Hyperparameter optimization
+optuna==3.4.0
+hyperopt==0.2.7
+
+# Model validation and metrics
+mlflow==2.8.1
+wandb==0.16.0
+
+# Testing
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-asyncio==0.21.1
+
+# Code quality
+black==23.11.0
+flake8==6.1.0
+isort==5.12.0
+mypy==1.7.1
+
+# Security
+cryptography==41.0.7
+bcrypt==4.1.1
+
+# Async support
+aiofiles==23.2.1
+aioredis==2.0.1
+
+# Development tools
+ipython==8.17.2
+jupyter==1.0.0
+notebook==7.0.6

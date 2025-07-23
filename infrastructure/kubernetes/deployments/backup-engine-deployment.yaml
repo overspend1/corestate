@@ -2,10 +2,18 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: backup-engine
+  namespace: corestate
   labels:
     app: backup-engine
+    component: core
+    version: v2.0.0
 spec:
   replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
   selector:
     matchLabels:
       app: backup-engine
@@ -13,9 +21,114 @@ spec:
     metadata:
       labels:
         app: backup-engine
+        component: core
+        version: v2.0.0
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/actuator/prometheus"
     spec:
+      serviceAccountName: backup-engine
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 2000
       containers:
       - name: backup-engine
-        image: ghcr.io/corestate/backup-engine:latest # Image will be updated by CI/CD
+        image: ghcr.io/corestate/backup-engine:latest
+        imagePullPolicy: Always
         ports:
-        - containerPort: 8080
+        - name: http
+          containerPort: 8080
+          protocol: TCP
+        - name: grpc
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: "kubernetes"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: backup-engine-secrets
+              key: database-url
+        - name: REDIS_URL
+          valueFrom:
+            secretKeyRef:
+              name: backup-engine-secrets
+              key: redis-url
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: backup-engine-secrets
+              key: aws-access-key-id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: backup-engine-secrets
+              key: aws-secret-access-key
+        - name: JVM_OPTS
+          value: "-Xmx2g -Xms1g -XX:+UseG1GC"
+        livenessProbe:
+          httpGet:
+            path: /actuator/health/liveness
+            port: http
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /actuator/health/readiness
+            port: http
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 3
+          failureThreshold: 3
+        resources:
+          requests:
+            memory: "1Gi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        volumeMounts:
+        - name: config
+          mountPath: /app/config
+          readOnly: true
+        - name: temp-storage
+          mountPath: /tmp
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+      volumes:
+      - name: config
+        configMap:
+          name: backup-engine-config
+      - name: temp-storage
+        emptyDir:
+          sizeLimit: 1Gi
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - backup-engine
+              topologyKey: kubernetes.io/hostname
+      tolerations:
+      - key: "node.kubernetes.io/not-ready"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 300
+      - key: "node.kubernetes.io/unreachable"
+        operator: "Exists"
+        effect: "NoExecute"
+        tolerationSeconds: 300

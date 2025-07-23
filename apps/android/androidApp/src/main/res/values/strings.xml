@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CoreState</string>
+    
+    <!-- Navigation -->
+    <string name="nav_dashboard">Dashboard</string>
+    <string name="nav_backup">Backup</string>
+    <string name="nav_files">Files</string>
+    <string name="nav_settings">Settings</string>
+    
+    <!-- Dashboard -->
+    <string name="dashboard_title">Dashboard</string>
+    <string name="backup_in_progress">Backup in Progress</string>
+    <string name="ready_to_backup">Ready to Backup</string>
+    <string name="start_backup">Start Backup</string>
+    <string name="stop_backup">Stop Backup</string>
+    <string name="total_backups">Total Backups</string>
+    <string name="storage_used">Storage Used</string>
+    <string name="files_protected">Files Protected</string>
+    <string name="last_backup">Last Backup</string>
+    <string name="quick_actions">Quick Actions</string>
+    <string name="recent_activity">Recent Activity</string>
+    
+    <!-- Backup -->
+    <string name="backup_title">Backup</string>
+    <string name="backup_settings">Backup Settings</string>
+    <string name="auto_backup">Auto Backup</string>
+    <string name="include_system_files">Include System Files</string>
+    <string name="encrypt_backups">Encrypt Backups</string>
+    <string name="selected_folders">Selected Folders</string>
+    <string name="add_folders">Add Folders</string>
+    <string name="backup_history">Backup History</string>
+    
+    <!-- Files -->
+    <string name="files_title">Files</string>
+    <string name="search_files">Search files...</string>
+    <string name="toggle_view">Toggle view</string>
+    <string name="refresh">Refresh</string>
+    <string name="restore">Restore</string>
+    <string name="download">Download</string>
+    <string name="delete">Delete</string>
+    <string name="backed_up">Backed up</string>
+    
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="account">Account</string>
+    <string name="account_info">Account Info</string>
+    <string name="storage">Storage</string>
+    <string name="subscription">Subscription</string>
+    <string name="backup_settings_title">Backup Settings</string>
+    <string name="wifi_only">WiFi Only</string>
+    <string name="backup_frequency">Backup Frequency</string>
+    <string name="security">Security</string>
+    <string name="biometric_lock">Biometric Lock</string>
+    <string name="change_pin">Change PIN</string>
+    <string name="two_factor_auth">Two-Factor Authentication</string>
+    <string name="sync">Sync</string>
+    <string name="p2p_sync">P2P Sync</string>
+    <string name="connected_devices">Connected Devices</string>
+    <string name="notifications">Notifications</string>
+    <string name="backup_notifications">Backup Notifications</string>
+    <string name="security_alerts">Security Alerts</string>
+    <string name="advanced">Advanced</string>
+    <string name="advanced_settings">Advanced Settings</string>
+    <string name="export_data">Export Data</string>
+    <string name="import_data">Import Data</string>
+    <string name="support">Support</string>
+    <string name="help_faq">Help &amp; FAQ</string>
+    <string name="contact_support">Contact Support</string>
+    <string name="app_version">App Version</string>
+    <string name="danger_zone">Danger Zone</string>
+    <string name="sign_out">Sign Out</string>
+    <string name="delete_account">Delete Account</string>
+    
+    <!-- Common -->
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+    <string name="save">Save</string>
+    <string name="back">Back</string>
+    <string name="next">Next</string>
+    <string name="done">Done</string>
+    <string name="error">Error</string>
+    <string name="loading">Loading…</string>
+    <string name="retry">Retry</string>
+    
+    <!-- File types -->
+    <string name="folders">Folders</string>
+    <string name="images">Images</string>
+    <string name="videos">Videos</string>
+    <string name="audio">Audio</string>
+    <string name="documents">Documents</string>
+    <string name="other">Other</string>
+    
+    <!-- Backup statuses -->
+    <string name="backup_completed">Backup Completed</string>
+    <string name="backup_failed">Backup Failed</string>
+    <string name="file_restored">File Restored</string>
+    <string name="sync_completed">Sync Completed</string>
+    
+    <!-- Notifications -->
+    <string name="backup_notification_title">CoreState Backup</string>
+    <string name="backup_notification_text">Backup in progress…</string>
+    <string name="backup_complete_notification">Backup completed successfully</string>
+    <string name="backup_failed_notification">Backup failed. Tap to retry.</string>
+    
+    <!-- Permissions -->
+    <string name="permission_storage_title">Storage Permission Required</string>
+    <string name="permission_storage_message">CoreState needs access to your storage to backup your files.</string>
+    <string name="permission_camera_title">Camera Permission Required</string>
+    <string name="permission_camera_message">CoreState needs camera access to scan QR codes for device pairing.</string>
+    <string name="permission_biometric_title">Biometric Permission Required</string>
+    <string name="permission_biometric_message">CoreState needs biometric access to secure your backups.</string>
+</resources>

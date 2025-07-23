@@ -5,12 +5,189 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
 
 jobs:
-  build:
+  dependency-scan:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component:
+          - path: 'apps/web-dashboard'
+            type: 'npm'
+          - path: 'services/sync-coordinator'
+            type: 'npm'
+          - path: 'apps/daemon'
+            type: 'cargo'
+          - path: 'services/storage-hal'
+            type: 'cargo'
+          - path: 'services/ml-optimizer'
+            type: 'pip'
+          - path: '.' 
+            type: 'gradle'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '${{ matrix.component.path }}'
+          format: 'sarif'
+          output: 'trivy-results-${{ matrix.component.type }}.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results-${{ matrix.component.type }}.sarif'
+          category: 'trivy-${{ matrix.component.type }}'
+          
+  secret-scan:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Build Placeholder
-        run: echo "Running security scan..."
+        
+      - name: Run GitLeaks secret scanner
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_LICENSE: ${{ secrets.GITLEAKS_LICENSE }}
+          
+  code-security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: java, javascript, python, cpp
+          queries: security-and-quality
+          
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+        
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:multi"
+          
+  semgrep-scan:
+    runs-on: ubuntu-latest
+    name: Semgrep Security Scan
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >
+            p/security-audit
+            p/owasp-top-10
+            p/kotlin
+            p/java
+            p/typescript
+            p/python
+            p/rust
+            p/cpp
+          generateSarif: "1"
+          
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+          
+  license-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: FOSSA Scan
+        uses: fossas/fossa-action@main
+        with:
+          api-key: ${{ secrets.FOSSA_API_KEY }}
+          run-tests: true
+        continue-on-error: true
+        
+  container-scan:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    strategy:
+      matrix:
+        service: [backup-engine, storage-hal, ml-optimizer, sync-coordinator]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Build Docker image for scanning
+        run: |
+          cd services/${{ matrix.service }}
+          if [ -f "Dockerfile" ]; then
+            docker build -t scan-image:${{ matrix.service }} .
+          else
+            echo "No Dockerfile found for ${{ matrix.service }}, skipping"
+            exit 0
+          fi
+          
+      - name: Run Trivy container scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'scan-image:${{ matrix.service }}'
+          format: 'sarif'
+          output: 'container-scan-${{ matrix.service }}.sarif'
+          severity: 'CRITICAL,HIGH'
+          
+      - name: Upload container scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'container-scan-${{ matrix.service }}.sarif'
+          category: 'container-${{ matrix.service }}'
+          
+  infrastructure-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Run Checkov IaC scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: infrastructure/
+          framework: terraform,kubernetes,dockerfile
+          output_format: sarif
+          output_file_path: checkov-results.sarif
+          
+      - name: Upload Checkov scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: checkov-results.sarif
+          category: 'infrastructure'
+          
+  security-report:
+    needs: [dependency-scan, secret-scan, code-security-scan, semgrep-scan, license-scan, container-scan, infrastructure-scan]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Security Scan Summary
+        run: |
+          echo "## Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "- Dependency Scan: ${{ needs.dependency-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Secret Scan: ${{ needs.secret-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Code Security Scan: ${{ needs.code-security-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Semgrep Scan: ${{ needs.semgrep-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- License Scan: ${{ needs.license-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Container Scan: ${{ needs.container-scan.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Infrastructure Scan: ${{ needs.infrastructure-scan.result }}" >> $GITHUB_STEP_SUMMARY

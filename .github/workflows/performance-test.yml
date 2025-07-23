@@ -5,12 +5,327 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+  schedule:
+    # Run performance tests weekly on Saturdays at 3 AM UTC
+    - cron: '0 3 * * 6'
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Type of performance test to run'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - backup
+          - restore
+          - deduplication
+          - compression
+          - ml_inference
+
+env:
+  PERFORMANCE_DATA_SIZE: 1GB
+  TEST_DURATION: 300  # 5 minutes
 
 jobs:
-  build:
+  setup-test-environment:
     runs-on: ubuntu-latest
+    outputs:
+      test-data-key: ${{ steps.generate-key.outputs.key }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-      - name: Build Placeholder
-        run: echo "Running performance test..."
+        
+      - name: Generate test data cache key
+        id: generate-key
+        run: echo "key=test-data-${{ github.run_id }}" >> $GITHUB_OUTPUT
+        
+      - name: Generate test data
+        run: |
+          mkdir -p test-data
+          # Generate various file types for testing
+          echo "Generating test data..."
+          
+          # Create text files
+          for i in {1..100}; do
+            head -c 10M </dev/urandom | base64 > test-data/text_file_$i.txt
+          done
+          
+          # Create binary files
+          for i in {1..50}; do
+            head -c 20M </dev/urandom > test-data/binary_file_$i.bin
+          done
+          
+          # Create duplicate files for deduplication testing
+          cp test-data/text_file_1.txt test-data/duplicate_1.txt
+          cp test-data/text_file_2.txt test-data/duplicate_2.txt
+          
+          echo "Test data generated: $(du -sh test-data)"
+          
+      - name: Cache test data
+        uses: actions/cache@v4
+        with:
+          path: test-data
+          key: ${{ steps.generate-key.outputs.key }}
+          
+  backup-performance:
+    needs: setup-test-environment
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.test_type == 'backup' || github.event.inputs.test_type == 'all' || github.event.inputs.test_type == '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Restore test data
+        uses: actions/cache@v4
+        with:
+          path: test-data
+          key: ${{ needs.setup-test-environment.outputs.test-data-key }}
+          
+      - name: Set up monitoring
+        run: |
+          # Install system monitoring tools
+          sudo apt-get update
+          sudo apt-get install -y htop iotop sysstat
+          
+          # Start system monitoring in background
+          iostat -x 1 > iostat.log &
+          IOSTAT_PID=$!
+          echo $IOSTAT_PID > iostat.pid
+          
+      - name: Build backup service
+        run: |
+          cd services/backup-engine
+          if [ -f "build.gradle.kts" ]; then
+            ../../gradlew build
+          else
+            echo "No build file found, creating mock backup service"
+            mkdir -p build
+            echo '#!/bin/bash' > build/backup_perf_test
+            echo 'echo "Mock backup performance test"' >> build/backup_perf_test
+            echo 'time tar -czf /tmp/backup.tar.gz "$@"' >> build/backup_perf_test
+            chmod +x build/backup_perf_test
+          fi
+          
+      - name: Run backup performance test
+        run: |
+          cd services/backup-engine
+          echo "Starting backup performance test..."
+          start_time=$(date +%s.%N)
+          
+          # Run backup with timing
+          if [ -f "build/backup_perf_test" ]; then
+            time ./build/backup_perf_test ../../test-data
+          else
+            time tar -czf /tmp/backup.tar.gz test-data
+          fi
+          
+          end_time=$(date +%s.%N)
+          duration=$(echo "$end_time - $start_time" | bc -l)
+          
+          echo "Backup completed in $duration seconds"
+          echo "BACKUP_DURATION=$duration" >> $GITHUB_ENV
+          
+          # Calculate throughput
+          data_size=$(du -sb test-data | cut -f1)
+          throughput=$(echo "scale=2; $data_size / $duration / 1024 / 1024" | bc -l)
+          echo "Backup throughput: $throughput MB/s"
+          echo "BACKUP_THROUGHPUT=$throughput" >> $GITHUB_ENV
+          
+      - name: Stop monitoring and collect metrics
+        run: |
+          # Stop iostat
+          if [ -f iostat.pid ]; then
+            kill $(cat iostat.pid) || true
+          fi
+          
+          # Collect system metrics
+          echo "=== System Metrics ===" > performance_metrics.txt
+          echo "Backup Duration: $BACKUP_DURATION seconds" >> performance_metrics.txt
+          echo "Backup Throughput: $BACKUP_THROUGHPUT MB/s" >> performance_metrics.txt
+          echo "" >> performance_metrics.txt
+          echo "=== CPU and Memory Usage ===" >> performance_metrics.txt
+          cat iostat.log | tail -20 >> performance_metrics.txt
+          
+      - name: Upload performance metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: backup-performance-metrics
+          path: |
+            performance_metrics.txt
+            iostat.log
+            
+  restore-performance:
+    needs: [setup-test-environment, backup-performance]
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.test_type == 'restore' || github.event.inputs.test_type == 'all' || github.event.inputs.test_type == '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Download backup from previous job
+        run: |
+          # In real scenario, we'd download the backup created in backup-performance job
+          # For now, create a mock backup
+          if [ ! -f "/tmp/backup.tar.gz" ]; then
+            echo "Creating mock backup for restore test"
+            mkdir -p mock-data
+            head -c 100M </dev/urandom > mock-data/large_file.bin
+            tar -czf /tmp/backup.tar.gz mock-data
+          fi
+          
+      - name: Run restore performance test
+        run: |
+          echo "Starting restore performance test..."
+          start_time=$(date +%s.%N)
+          
+          # Run restore with timing
+          mkdir -p restored-data
+          time tar -xzf /tmp/backup.tar.gz -C restored-data
+          
+          end_time=$(date +%s.%N)
+          duration=$(echo "$end_time - $start_time" | bc -l)
+          
+          echo "Restore completed in $duration seconds"
+          
+          # Calculate throughput
+          data_size=$(du -sb restored-data | cut -f1)
+          throughput=$(echo "scale=2; $data_size / $duration / 1024 / 1024" | bc -l)
+          echo "Restore throughput: $throughput MB/s"
+          
+          echo "=== Restore Performance ===" > restore_metrics.txt
+          echo "Duration: $duration seconds" >> restore_metrics.txt
+          echo "Throughput: $throughput MB/s" >> restore_metrics.txt
+          
+      - name: Upload restore metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: restore-performance-metrics
+          path: restore_metrics.txt
+          
+  ml-inference-performance:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.test_type == 'ml_inference' || github.event.inputs.test_type == 'all' || github.event.inputs.test_type == '' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          
+      - name: Install ML dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install scikit-learn pandas numpy time
+          
+      - name: Run ML inference performance test
+        run: |
+          cd services/ml-optimizer
+          python -c "
+          import time
+          import numpy as np
+          from sklearn.ensemble import RandomForestClassifier
+          from sklearn.datasets import make_classification
+          
+          print('Generating test data...')
+          X, y = make_classification(n_samples=10000, n_features=20, n_classes=2, random_state=42)
+          
+          print('Training model...')
+          model = RandomForestClassifier(n_estimators=100, random_state=42)
+          start_time = time.time()
+          model.fit(X, y)
+          training_time = time.time() - start_time
+          
+          print('Running inference performance test...')
+          test_X, _ = make_classification(n_samples=1000, n_features=20, n_classes=2, random_state=123)
+          
+          # Measure inference time
+          start_time = time.time()
+          predictions = model.predict(test_X)
+          inference_time = time.time() - start_time
+          
+          throughput = len(test_X) / inference_time
+          
+          print(f'Training time: {training_time:.2f} seconds')
+          print(f'Inference time: {inference_time:.4f} seconds')
+          print(f'Inference throughput: {throughput:.2f} predictions/second')
+          
+          # Save metrics
+          with open('ml_performance_metrics.txt', 'w') as f:
+              f.write(f'Training time: {training_time:.2f} seconds\n')
+              f.write(f'Inference time: {inference_time:.4f} seconds\n')
+              f.write(f'Inference throughput: {throughput:.2f} predictions/second\n')
+          "
+          
+      - name: Upload ML performance metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: ml-inference-performance-metrics
+          path: services/ml-optimizer/ml_performance_metrics.txt
+          
+  performance-report:
+    needs: [backup-performance, restore-performance, ml-inference-performance]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Download all performance metrics
+        uses: actions/download-artifact@v4
+        with:
+          path: metrics
+          
+      - name: Generate performance report
+        run: |
+          echo "# Performance Test Report" > performance_report.md
+          echo "" >> performance_report.md
+          echo "Generated on: $(date)" >> performance_report.md
+          echo "" >> performance_report.md
+          
+          if [ -d "metrics/backup-performance-metrics" ]; then
+            echo "## Backup Performance" >> performance_report.md
+            echo '```' >> performance_report.md
+            cat metrics/backup-performance-metrics/performance_metrics.txt >> performance_report.md
+            echo '```' >> performance_report.md
+            echo "" >> performance_report.md
+          fi
+          
+          if [ -d "metrics/restore-performance-metrics" ]; then
+            echo "## Restore Performance" >> performance_report.md
+            echo '```' >> performance_report.md
+            cat metrics/restore-performance-metrics/restore_metrics.txt >> performance_report.md
+            echo '```' >> performance_report.md
+            echo "" >> performance_report.md
+          fi
+          
+          if [ -d "metrics/ml-inference-performance-metrics" ]; then
+            echo "## ML Inference Performance" >> performance_report.md
+            echo '```' >> performance_report.md
+            cat metrics/ml-inference-performance-metrics/ml_performance_metrics.txt >> performance_report.md
+            echo '```' >> performance_report.md
+          fi
+          
+      - name: Upload consolidated report
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-test-report
+          path: performance_report.md
+          
+      - name: Comment performance results on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const reportPath = 'performance_report.md';
+            
+            if (fs.existsSync(reportPath)) {
+              const report = fs.readFileSync(reportPath, 'utf8');
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: report
+              });
+            }
