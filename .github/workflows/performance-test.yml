@@ -93,12 +93,18 @@ jobs:
           IOSTAT_PID=$!
           echo $IOSTAT_PID > iostat.pid
           
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          
       - name: Build backup service
         run: |
           chmod +x gradlew
           cd services/backup-engine
           if [ -f "build.gradle.kts" ]; then
-            ../../gradlew build
+            ../../gradlew :services:backup-engine:build -x test --no-daemon
           else
             echo "No build file found, creating mock backup service"
             mkdir -p build

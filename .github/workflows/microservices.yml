@@ -62,7 +62,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [storage-hal]
+        service: [storage-hal, compression-engine]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -185,7 +185,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        service: [backup-engine, storage-hal, ml-optimizer, sync-coordinator]
+        service: [backup-engine, storage-hal, compression-engine, ml-optimizer, sync-coordinator]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
