@@ -14,6 +14,12 @@ java {
     sourceCompatibility = JavaVersion.VERSION_17
 }
 
+dependencyManagement {
+    imports {
+        mavenBom("org.springframework.cloud:spring-cloud-dependencies:2022.0.4")
+    }
+}
+
 
 dependencies {
     // Spring Boot core
@@ -64,7 +70,8 @@ dependencies {
     implementation("io.github.microutils:kotlin-logging-jvm:3.0.5")
     
     // Configuration
-    implementation("org.springframework.cloud:spring-cloud-starter-kubernetes-config:3.0.5")
+    implementation("org.springframework.cloud:spring-cloud-starter-config")
+    implementation("org.springframework.cloud:spring-cloud-starter-bootstrap")
     
     // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test")
