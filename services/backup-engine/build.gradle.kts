@@ -73,6 +73,14 @@ dependencies {
     implementation("org.springframework.cloud:spring-cloud-starter-config")
     implementation("org.springframework.cloud:spring-cloud-starter-bootstrap")
     
+    // OpenAPI/Swagger documentation
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.2.0")
+    implementation("org.springdoc:springdoc-openapi-starter-common:2.2.0")
+    
+    // Service clients and communication
+    implementation("org.springframework.boot:spring-boot-starter-webflux")
+    implementation("org.springframework.cloud:spring-cloud-starter-openfeign")
+    
     // Testing
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.mockito.kotlin:mockito-kotlin:5.1.0")

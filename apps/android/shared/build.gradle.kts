@@ -76,8 +76,8 @@ kotlin {
                 implementation("io.grpc:grpc-protobuf-lite:1.58.0")
                 implementation("io.grpc:grpc-stub:1.58.0")
                 
-                // WebRTC
-                implementation("org.webrtc:google-webrtc:1.0.32006")
+                // WebRTC - Using Stream's WebRTC
+                implementation("io.getstream:stream-webrtc-android:1.0.8")
             }
         }
         

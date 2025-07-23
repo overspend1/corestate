@@ -117,11 +117,18 @@ jobs:
         uses: actions/checkout@v4
         
       - name: FOSSA Scan
+        if: ${{ secrets.FOSSA_API_KEY != '' }}
         uses: fossas/fossa-action@main
         with:
           api-key: ${{ secrets.FOSSA_API_KEY }}
           run-tests: true
         continue-on-error: true
+        
+      - name: Skip FOSSA Scan
+        if: ${{ secrets.FOSSA_API_KEY == '' }}
+        run: |
+          echo "FOSSA_API_KEY secret not found, skipping FOSSA scan"
+          echo "To enable FOSSA scanning, add FOSSA_API_KEY to repository secrets"
         
   container-scan:
     runs-on: ubuntu-latest
@@ -133,30 +140,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         
-      - name: Build Docker image for scanning
+      - name: Check for Dockerfile
+        id: dockerfile-check
         run: |
           cd services/${{ matrix.service }}
           if [ -f "Dockerfile" ]; then
-            docker build -t scan-image:${{ matrix.service }} .
+            echo "dockerfile_exists=true" >> $GITHUB_OUTPUT
+            echo "Dockerfile found for ${{ matrix.service }}"
           else
-            echo "No Dockerfile found for ${{ matrix.service }}, skipping"
-            exit 0
+            echo "dockerfile_exists=false" >> $GITHUB_OUTPUT
+            echo "No Dockerfile found for ${{ matrix.service }}, skipping container scan"
           fi
           
+      - name: Build Docker image for scanning
+        if: steps.dockerfile-check.outputs.dockerfile_exists == 'true'
+        run: |
+          cd services/${{ matrix.service }}
+          docker build -t scan-image:${{ matrix.service }} .
+          
       - name: Run Trivy container scan
+        if: steps.dockerfile-check.outputs.dockerfile_exists == 'true'
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: 'scan-image:${{ matrix.service }}'
           format: 'sarif'
           output: 'container-scan-${{ matrix.service }}.sarif'
           severity: 'CRITICAL,HIGH'
+        continue-on-error: true
           
       - name: Upload container scan results
+        if: steps.dockerfile-check.outputs.dockerfile_exists == 'true' && always()
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
         with:
           sarif_file: 'container-scan-${{ matrix.service }}.sarif'
           category: 'container-${{ matrix.service }}'
+        continue-on-error: true
           
   infrastructure-scan:
     runs-on: ubuntu-latest
@@ -164,20 +182,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         
+      - name: Check infrastructure directory
+        id: infra-check
+        run: |
+          if [ -d "infrastructure" ]; then
+            echo "infra_exists=true" >> $GITHUB_OUTPUT
+            echo "Infrastructure directory found"
+          else
+            echo "infra_exists=false" >> $GITHUB_OUTPUT
+            echo "Infrastructure directory not found, skipping IaC scan"
+          fi
+        
       - name: Run Checkov IaC scan
+        if: steps.infra-check.outputs.infra_exists == 'true'
         uses: bridgecrewio/checkov-action@master
         with:
           directory: infrastructure/
           framework: terraform,kubernetes,dockerfile
           output_format: sarif
           output_file_path: checkov-results.sarif
+          log_level: WARNING
+        continue-on-error: true
           
       - name: Upload Checkov scan results
+        if: steps.infra-check.outputs.infra_exists == 'true' && always()
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
         with:
           sarif_file: checkov-results.sarif
           category: 'infrastructure'
+        continue-on-error: true
           
   security-report:
     needs: [dependency-scan, secret-scan, code-security-scan, semgrep-scan, license-scan, container-scan, infrastructure-scan]

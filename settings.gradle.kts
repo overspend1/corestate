@@ -12,6 +12,24 @@ dependencyResolutionManagement {
         google()
         mavenCentral()
         gradlePluginPortal()
+        
+        // JitPack for GitHub dependencies like MPAndroidChart
+        maven {
+            name = "JitPack"
+            url = uri("https://jitpack.io")
+        }
+        
+        // WebRTC repository
+        maven {
+            name = "WebRTC"
+            url = uri("https://maven.google.com")
+        }
+        
+        // Additional repositories for dependencies
+        maven {
+            name = "Sonatype Snapshots"
+            url = uri("https://oss.sonatype.org/content/repositories/snapshots/")
+        }
     }
 }
 

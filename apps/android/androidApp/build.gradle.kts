@@ -139,8 +139,8 @@ dependencies {
     // Security
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     
-    // WebRTC (for P2P sync)
-    implementation("org.webrtc:google-webrtc:1.0.32006")
+    // WebRTC (for P2P sync) - Using Stream's WebRTC which is actively maintained
+    implementation("io.getstream:stream-webrtc-android:1.0.8")
     
     // Permissions
     implementation("com.google.accompanist:accompanist-permissions:0.32.0")
