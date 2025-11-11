@@ -1,0 +1,17 @@
+{
+  "analysis": {
+    "analyzer": {
+      "path_analyzer": {
+        "type": "custom",
+        "tokenizer": "path_tokenizer",
+        "filter": ["lowercase"]
+      }
+    },
+    "tokenizer": {
+      "path_tokenizer": {
+        "type": "path_hierarchy",
+        "delimiter": "/"
+      }
+    }
+  }
+}

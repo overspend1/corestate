@@ -1,0 +1,94 @@
+spring:
+  application:
+    name: index-service
+
+  elasticsearch:
+    uris: ${ELASTICSEARCH_URIS:http://localhost:9200}
+    username: ${ELASTICSEARCH_USERNAME:elastic}
+    password: ${ELASTICSEARCH_PASSWORD:changeme}
+    connection-timeout: 5s
+    socket-timeout: 30s
+
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/corestate_index}
+    username: ${DATABASE_USER:postgres}
+    password: ${DATABASE_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      connection-timeout: 30000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+
+  redis:
+    host: ${REDIS_HOST:localhost}
+    port: ${REDIS_PORT:6379}
+    password: ${REDIS_PASSWORD:}
+    timeout: 2000ms
+
+server:
+  port: ${SERVER_PORT:8085}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  level:
+    root: INFO
+    com.corestate.index: DEBUG
+    org.springframework.data.elasticsearch: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# Application-specific configuration
+index:
+  elasticsearch:
+    index-prefix: corestate-
+    refresh-interval: 5s
+    number-of-shards: 3
+    number-of-replicas: 2
+
+  search:
+    default-page-size: 20
+    max-page-size: 100
+    highlight-fragment-size: 150
+
+  batch:
+    size: 1000
+    thread-pool-size: 4
+
+  content-extraction:
+    enabled: true
+    max-file-size: 10485760  # 10MB
+    supported-types:
+      - "text/plain"
+      - "text/html"
+      - "text/xml"
+      - "application/json"
+      - "application/pdf"
+
+grpc:
+  server:
+    port: ${GRPC_PORT:9085}
