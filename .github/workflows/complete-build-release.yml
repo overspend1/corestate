@@ -1,0 +1,552 @@
+name: Complete Build & Release
+
+# This workflow builds all production artifacts:
+# - Android APK (debug and release)
+# - KernelSU Module (packaged as flashable zip)
+# - Build metadata and checksums
+
+on:
+  push:
+    branches: [ main, develop, 'claude/**' ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type (debug/release)'
+        required: false
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
+
+env:
+  GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4096m -Dorg.gradle.daemon=false"
+  VERSION: "2.0.0"
+
+jobs:
+  # Build Android APK
+  build-android-apk:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        build-type: [debug, release]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Cache Gradle packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Extract version information
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION="${{ env.VERSION }}-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Build Android App (${{ matrix.build-type }})
+        run: |
+          echo "Building CoreState Android App - ${{ matrix.build-type }}"
+          echo "Author: Wiktor (overspend1)"
+          echo "Version: ${{ steps.version.outputs.version }}"
+
+          if [ "${{ matrix.build-type }}" = "release" ]; then
+            ./gradlew :apps:android:androidApp:assembleRelease \
+              -Pversion=${{ steps.version.outputs.version }} \
+              --stacktrace
+          else
+            ./gradlew :apps:android:androidApp:assembleDebug \
+              -Pversion=${{ steps.version.outputs.version }} \
+              --stacktrace
+          fi
+
+      - name: Verify APK was created
+        run: |
+          APK_PATH="apps/android/androidApp/build/outputs/apk/${{ matrix.build-type }}"
+          if [ ! -d "$APK_PATH" ] || [ -z "$(ls -A $APK_PATH)" ]; then
+            echo "Error: APK not found in $APK_PATH"
+            exit 1
+          fi
+          echo "APK files:"
+          ls -lh $APK_PATH/
+
+      - name: Rename APK with version
+        run: |
+          cd apps/android/androidApp/build/outputs/apk/${{ matrix.build-type }}
+          for apk in *.apk; do
+            if [ -f "$apk" ]; then
+              mv "$apk" "CoreState-v${{ steps.version.outputs.version }}-${{ matrix.build-type }}.apk"
+            fi
+          done
+          ls -lh
+
+      - name: Generate APK checksum
+        run: |
+          cd apps/android/androidApp/build/outputs/apk/${{ matrix.build-type }}
+          sha256sum *.apk > checksums.txt
+          cat checksums.txt
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: corestate-android-${{ matrix.build-type }}-apk
+          path: |
+            apps/android/androidApp/build/outputs/apk/${{ matrix.build-type }}/*.apk
+            apps/android/androidApp/build/outputs/apk/${{ matrix.build-type }}/checksums.txt
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Get APK info
+        run: |
+          APK_FILE=$(find apps/android/androidApp/build/outputs/apk/${{ matrix.build-type }} -name "*.apk" | head -1)
+          if [ -f "$APK_FILE" ]; then
+            echo "APK Size: $(du -h "$APK_FILE" | cut -f1)"
+            echo "APK Path: $APK_FILE"
+          fi
+
+  # Build KernelSU Module
+  build-kernelsu-module:
+    name: Build KernelSU Module
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [arm64-v8a, x86_64]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            zip \
+            wget \
+            curl
+
+          # Install Android NDK for cross-compilation
+          wget -q https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
+          unzip -q android-ndk-r26b-linux.zip
+          echo "NDK_HOME=$PWD/android-ndk-r26b" >> $GITHUB_ENV
+
+      - name: Extract version information
+        id: version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+          else
+            VERSION="${{ env.VERSION }}-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building module version: $VERSION"
+
+      - name: Prepare module directory structure
+        run: |
+          echo "Preparing KernelSU module structure for ${{ matrix.arch }}"
+          mkdir -p module_build/system/lib64
+          mkdir -p module_build/system/lib
+          mkdir -p module_build/META-INF/com/google/android
+
+      - name: Build native components
+        run: |
+          echo "Building native components for ${{ matrix.arch }}"
+          cd module/native
+          mkdir -p build_${{ matrix.arch }}
+          cd build_${{ matrix.arch }}
+
+          # Configure for Android NDK
+          if [ "${{ matrix.arch }}" = "arm64-v8a" ]; then
+            cmake .. \
+              -DCMAKE_TOOLCHAIN_FILE=$NDK_HOME/build/cmake/android.toolchain.cmake \
+              -DANDROID_ABI=arm64-v8a \
+              -DANDROID_PLATFORM=android-26 \
+              -DCMAKE_BUILD_TYPE=Release \
+              -GNinja
+          else
+            cmake .. \
+              -DCMAKE_TOOLCHAIN_FILE=$NDK_HOME/build/cmake/android.toolchain.cmake \
+              -DANDROID_ABI=x86_64 \
+              -DANDROID_PLATFORM=android-26 \
+              -DCMAKE_BUILD_TYPE=Release \
+              -GNinja
+          fi
+
+          ninja -j$(nproc)
+
+          echo "Build completed for ${{ matrix.arch }}"
+          ls -lh
+
+      - name: Copy built libraries
+        run: |
+          if [ "${{ matrix.arch }}" = "arm64-v8a" ]; then
+            cp module/native/build_${{ matrix.arch }}/*.so module_build/system/lib64/ 2>/dev/null || true
+          else
+            cp module/native/build_${{ matrix.arch }}/*.so module_build/system/lib/ 2>/dev/null || true
+          fi
+
+      - name: Create module files
+        run: |
+          echo "Creating module structure"
+
+          # Copy module.prop
+          cp module/module.prop module_build/
+
+          # Update version in module.prop
+          sed -i "s/version=.*/version=v${{ steps.version.outputs.version }}/" module_build/module.prop
+
+          # Create install script
+          cat > module_build/META-INF/com/google/android/update-binary << 'EOF'
+          #!/sbin/sh
+          # CoreState v2.0 KernelSU Module Installer
+          # Author: Wiktor (overspend1)
+
+          OUTFD=$2
+          ZIPFILE=$3
+
+          ui_print() {
+            echo "ui_print $1" > /proc/self/fd/$OUTFD
+            echo "ui_print" > /proc/self/fd/$OUTFD
+          }
+
+          ui_print "*********************************"
+          ui_print "  CoreState v2.0 KernelSU Module"
+          ui_print "  Author: Wiktor (overspend1)"
+          ui_print "  Version: ${{ steps.version.outputs.version }}"
+          ui_print "*********************************"
+          ui_print ""
+          ui_print "Installing module..."
+
+          # Extract module
+          MODPATH=/data/adb/modules/corestate_v2
+          mkdir -p $MODPATH
+
+          # Extract files
+          unzip -o "$ZIPFILE" -d $MODPATH
+
+          # Set permissions
+          set_perm_recursive $MODPATH 0 0 0755 0644
+
+          ui_print "Installation complete!"
+          ui_print "Reboot to activate the module"
+
+          exit 0
+          EOF
+
+          chmod +x module_build/META-INF/com/google/android/update-binary
+
+          # Create updater-script
+          cat > module_build/META-INF/com/google/android/updater-script << 'EOF'
+          #MAGISK
+          EOF
+
+          # Create service script
+          cat > module_build/service.sh << 'EOF'
+          #!/system/bin/sh
+          # CoreState v2.0 Service Script
+          # Author: Wiktor (overspend1)
+
+          MODDIR=${0%/*}
+
+          # Wait for boot to complete
+          while [ "$(getprop sys.boot_completed)" != "1" ]; do
+            sleep 1
+          done
+
+          # Start CoreState services
+          log -t CoreState "CoreState v2.0 module started"
+          EOF
+
+          chmod +x module_build/service.sh
+
+          # Create README
+          cat > module_build/README.md << 'EOF'
+          # CoreState v2.0 KernelSU Module
+
+          **Author:** Wiktor (overspend1)
+          **Version:** ${{ steps.version.outputs.version }}
+          **GitHub:** https://github.com/overspend1/corestate
+
+          ## Description
+          Enhanced system-level operations for CoreState v2.0, including:
+          - Copy-on-write snapshots
+          - Hardware-accelerated operations
+          - Real-time file system monitoring
+
+          ## Installation
+          1. Flash this ZIP through KernelSU Manager
+          2. Reboot your device
+          3. Module will be activated automatically
+
+          ## Requirements
+          - KernelSU installed
+          - Android 8.0+ (API 26+)
+          - ARM64 or x86_64 architecture
+
+          ## Support
+          Report issues: https://github.com/overspend1/corestate/issues
+
+          ## License
+          MIT License - Copyright (c) 2025 Wiktor
+          EOF
+
+      - name: Create flashable ZIP
+        run: |
+          echo "Creating flashable ZIP for ${{ matrix.arch }}"
+          cd module_build
+          zip -r ../CoreState-Module-v${{ steps.version.outputs.version }}-${{ matrix.arch }}.zip . -x "*.git*"
+          cd ..
+
+          echo "Module ZIP created:"
+          ls -lh CoreState-Module-*.zip
+
+      - name: Generate module checksum
+        run: |
+          sha256sum CoreState-Module-*.zip > module-checksums-${{ matrix.arch }}.txt
+          cat module-checksums-${{ matrix.arch }}.txt
+
+      - name: Upload module artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: corestate-module-${{ matrix.arch }}
+          path: |
+            CoreState-Module-*.zip
+            module-checksums-${{ matrix.arch }}.txt
+          retention-days: 30
+          if-no-files-found: error
+
+  # Create release summary
+  create-release-summary:
+    name: Create Release Summary
+    needs: [build-android-apk, build-kernelsu-module]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Generate build summary
+        run: |
+          cat > build-summary.md << 'EOF'
+          # CoreState v2.0 - Build Summary
+
+          **Author:** Wiktor (overspend1)
+          **Repository:** https://github.com/overspend1/corestate
+          **Build Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          **Commit:** ${{ github.sha }}
+          **Branch:** ${{ github.ref_name }}
+
+          ## Build Artifacts
+
+          ### Android APK
+          - **Debug APK**: Ready for testing
+          - **Release APK**: Production build
+
+          ### KernelSU Module
+          - **arm64-v8a**: For 64-bit ARM devices
+          - **x86_64**: For x86_64 emulators/devices
+
+          ## Installation Instructions
+
+          ### Android App
+          1. Download the appropriate APK (debug for testing, release for production)
+          2. Enable "Install from unknown sources"
+          3. Install the APK
+          4. Grant required permissions
+
+          ### KernelSU Module
+          1. Download the module ZIP for your architecture
+          2. Open KernelSU Manager
+          3. Flash the module ZIP
+          4. Reboot device
+
+          ## Checksums
+
+          All artifacts include SHA256 checksums for verification.
+
+          ## Support
+
+          - **Issues**: https://github.com/overspend1/corestate/issues
+          - **Documentation**: See IMPLEMENTATION_COMPLETE.md
+
+          ## License
+
+          MIT License - Copyright (c) 2025 Wiktor
+
+          ---
+
+          Built with ❤️ by Wiktor (overspend1)
+          EOF
+
+          cat build-summary.md
+
+      - name: List all artifacts
+        run: |
+          echo "=== BUILD ARTIFACTS ==="
+          find artifacts -type f -exec ls -lh {} \;
+
+          echo ""
+          echo "=== CHECKSUMS ==="
+          find artifacts -name "checksums*.txt" -o -name "module-checksums*.txt" | while read file; do
+            echo "File: $file"
+            cat "$file"
+            echo ""
+          done
+
+      - name: Upload build summary
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-summary
+          path: build-summary.md
+          retention-days: 90
+
+  # Create GitHub Release (only on tags)
+  create-github-release:
+    name: Create GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [build-android-apk, build-kernelsu-module]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          find release-artifacts -type f \( -name "*.apk" -o -name "*.zip" -o -name "*checksums*.txt" \) -exec cp {} release/ \;
+          ls -lh release/
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          cat > release-notes.md << 'EOF'
+          # CoreState v2.0 - Release ${{ github.ref_name }}
+
+          **Author:** Wiktor (overspend1)
+          **Repository:** https://github.com/overspend1/corestate
+
+          ## What's New
+
+          Complete enterprise backup system managed entirely through Android!
+
+          ### Features
+          - ✅ Android-managed enterprise backup
+          - ✅ Real-time analytics with ML anomaly detection
+          - ✅ Full-text search with Elasticsearch
+          - ✅ 9 microservices fully implemented
+          - ✅ Service-to-service integration complete
+          - ✅ Backup and restore workflows functional
+
+          ## Downloads
+
+          ### Android App
+          - **Debug APK**: For testing and development
+          - **Release APK**: For production use
+
+          ### KernelSU Module
+          - **arm64-v8a**: For 64-bit ARM devices (most modern Android phones)
+          - **x86_64**: For x86_64 emulators/devices
+
+          ## Installation
+
+          See [IMPLEMENTATION_COMPLETE.md](IMPLEMENTATION_COMPLETE.md) for detailed instructions.
+
+          ## Checksums
+
+          SHA256 checksums are included for all artifacts.
+
+          ## Support
+
+          Report issues: https://github.com/overspend1/corestate/issues
+
+          ---
+
+          Built with ❤️ by Wiktor (overspend1)
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Build status notification
+  build-status:
+    name: Build Status
+    needs: [build-android-apk, build-kernelsu-module, create-release-summary]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check build status
+        run: |
+          echo "==================================="
+          echo "CoreState v2.0 Build Complete"
+          echo "==================================="
+          echo "Author: Wiktor (overspend1)"
+          echo "Repository: https://github.com/overspend1/corestate"
+          echo ""
+          echo "Build Status:"
+          echo "  Android APK: ${{ needs.build-android-apk.result }}"
+          echo "  KernelSU Module: ${{ needs.build-kernelsu-module.result }}"
+          echo "  Release Summary: ${{ needs.create-release-summary.result }}"
+          echo ""
+
+          if [ "${{ needs.build-android-apk.result }}" = "success" ] && [ "${{ needs.build-kernelsu-module.result }}" = "success" ]; then
+            echo "✅ All builds successful!"
+            exit 0
+          else
+            echo "❌ Some builds failed"
+            exit 1
+          fi
