@@ -1,0 +1,364 @@
+version: '3.8'
+
+services:
+  # ==================== Infrastructure Services ====================
+  
+  postgres:
+    image: postgres:15-alpine
+    container_name: corestate-postgres
+    environment:
+      POSTGRES_DB: corestate
+      POSTGRES_USER: corestate
+      POSTGRES_PASSWORD: corestate_dev_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U corestate"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: corestate-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: corestate-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx1g"
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: corestate-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+      - "9094:9094"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,OUTSIDE://0.0.0.0:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,OUTSIDE://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,OUTSIDE:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: corestate-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+      - zookeeper_logs:/var/lib/zookeeper/log
+
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: corestate-influxdb
+    ports:
+      - "8086:8086"
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: adminpass123
+      DOCKER_INFLUXDB_INIT_ORG: corestate
+      DOCKER_INFLUXDB_INIT_BUCKET: backup-analytics
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: dev-token-12345
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    healthcheck:
+      test: ["CMD", "influx", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: corestate-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: corestate-grafana
+    ports:
+      - "3100:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./infrastructure/monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./infrastructure/monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+    depends_on:
+      - prometheus
+      - influxdb
+
+  # ==================== CoreState Microservices ====================
+
+  backup-engine:
+    build:
+      context: ./services/backup-engine
+      dockerfile: Dockerfile
+    container_name: corestate-backup-engine
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/corestate
+      SPRING_DATASOURCE_USERNAME: corestate
+      SPRING_DATASOURCE_PASSWORD: corestate_dev_pass
+      COMPRESSION_ENGINE_URL: http://compression-engine:8080
+      ENCRYPTION_SERVICE_URL: http://encryption-service:3000
+      DEDUPLICATION_SERVICE_URL: http://deduplication-service:8001
+      STORAGE_HAL_URL: http://storage-hal:8080
+      ML_OPTIMIZER_URL: http://ml-optimizer:8000
+      SYNC_COORDINATOR_URL: http://sync-coordinator:3001
+      INDEX_SERVICE_URL: http://index-service:8081
+    depends_on:
+      - postgres
+      - redis
+      - kafka
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  storage-hal:
+    build:
+      context: ./services/storage-hal
+      dockerfile: Dockerfile
+    container_name: corestate-storage-hal
+    ports:
+      - "8083:8080"
+    environment:
+      RUST_LOG: info
+      BIND_ADDRESS: 0.0.0.0:8080
+      ERASURE_DATA_SHARDS: "8"
+      ERASURE_PARITY_SHARDS: "2"
+      STORAGE_BACKEND: filesystem
+      STORAGE_PATH: /data/storage
+    volumes:
+      - storage_data:/data/storage
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  compression-engine:
+    build:
+      context: ./services/compression-engine
+      dockerfile: Dockerfile
+    container_name: corestate-compression-engine
+    ports:
+      - "8084:8080"
+    environment:
+      RUST_LOG: info
+      BIND_ADDRESS: 0.0.0.0:8080
+      DEFAULT_ALGORITHM: zstd
+      ZSTD_LEVEL: "3"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  ml-optimizer:
+    build:
+      context: ./services/ml-optimizer
+      dockerfile: Dockerfile
+    container_name: corestate-ml-optimizer
+    ports:
+      - "8000:8000"
+    environment:
+      LOG_LEVEL: INFO
+      MODEL_PATH: /app/models
+      REDIS_URL: redis://redis:6379
+    volumes:
+      - ml_models:/app/models
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  encryption-service:
+    build:
+      context: ./services/encryption-service
+      dockerfile: Dockerfile
+    container_name: corestate-encryption-service
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: "3000"
+      REDIS_URL: redis://redis:6379
+      MASTER_KEY: dev-master-key-change-in-production-1234567890
+      KEY_ROTATION_INTERVAL: "86400"
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  sync-coordinator:
+    build:
+      context: ./services/sync-coordinator
+      dockerfile: Dockerfile
+    container_name: corestate-sync-coordinator
+    ports:
+      - "3001:3001"
+      - "4444:4444"
+    environment:
+      NODE_ENV: development
+      PORT: "3001"
+      WEBSOCKET_PORT: "4444"
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  deduplication-service:
+    build:
+      context: ./services/deduplication-service
+      dockerfile: Dockerfile
+    container_name: corestate-deduplication-service
+    ports:
+      - "8001:8001"
+    environment:
+      REDIS_URL: redis://redis:6379
+      REDIS_DB: "1"
+      CHUNK_SIZE: "4194304"
+      LOG_LEVEL: INFO
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  index-service:
+    build:
+      context: ./services/index-service
+      dockerfile: Dockerfile
+    container_name: corestate-index-service
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      SPRING_ELASTICSEARCH_URIS: http://elasticsearch:9200
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/corestate
+      SPRING_DATASOURCE_USERNAME: corestate
+      SPRING_DATASOURCE_PASSWORD: corestate_dev_pass
+    depends_on:
+      - postgres
+      - elasticsearch
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8081/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  analytics-engine:
+    build:
+      context: ./services/analytics-engine
+      dockerfile: Dockerfile
+    container_name: corestate-analytics-engine
+    ports:
+      - "8082:8082"
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: backup-events
+      INFLUXDB_URL: http://influxdb:8086
+      INFLUXDB_TOKEN: dev-token-12345
+      INFLUXDB_ORG: corestate
+      INFLUXDB_BUCKET: backup-analytics
+      SPARK_MASTER: local[*]
+    volumes:
+      - analytics_data:/data/parquet
+    depends_on:
+      - kafka
+      - influxdb
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8082/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
+  elasticsearch_data:
+  kafka_data:
+  zookeeper_data:
+  zookeeper_logs:
+  influxdb_data:
+  prometheus_data:
+  grafana_data:
+  storage_data:
+  ml_models:
+  analytics_data:
+
+networks:
+  default:
+    name: corestate-network
+    driver: bridge

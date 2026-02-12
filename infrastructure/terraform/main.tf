@@ -54,7 +54,7 @@ variable "cluster_version" {
   default     = "1.28"
 }
 
-Provider "aws" {
+provider "aws" {
   region = local.region
   
   default_tags {

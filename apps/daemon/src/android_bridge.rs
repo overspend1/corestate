@@ -1,5 +1,7 @@
 use crate::config::DaemonConfig;
 use crate::backup::BackupManager;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Instant;
 use crate::filesystem::FileSystemMonitor;
 use crate::kernel_interface::KernelInterface;
 
@@ -148,6 +150,7 @@ pub struct AndroidBridge {
     kernel_interface: Arc<KernelInterface>,
     clients: Arc<RwLock<HashMap<String, AndroidClient>>>,
     event_sender: mpsc::UnboundedSender<AndroidMessage>,
+    start_time: Instant,
 }
 
 impl AndroidBridge {
@@ -166,6 +169,7 @@ impl AndroidBridge {
             kernel_interface,
             clients: Arc::new(RwLock::new(HashMap::new())),
             event_sender,
+            start_time: Instant::now(),
         })
     }
 
@@ -312,13 +316,18 @@ impl AndroidBridge {
 
             AndroidMessageType::GetSystemStatus => {
                 let backup_manager = backup_manager.read().await;
+                let uptime = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                    
                 let status = SystemStatusInfo {
-                    daemon_uptime: 12345, // TODO: Calculate actual uptime
+                    daemon_uptime: uptime,
                     active_backups: backup_manager.get_active_job_count().await,
                     total_files_backed_up: backup_manager.get_total_files_backed_up().await,
                     total_backup_size: backup_manager.get_total_backup_size().await,
-                    memory_usage: Self::get_memory_usage(),
-                    cpu_usage: Self::get_cpu_usage(),
+                    memory_usage: Self::get_memory_usage().await,
+                    cpu_usage: Self::get_cpu_usage().await,
                     kernel_module_loaded: kernel_interface.is_loaded().await,
                     services_status: Self::get_services_status().await,
                 };
@@ -444,24 +453,81 @@ impl AndroidBridge {
         }
     }
 
-    fn get_memory_usage() -> u64 {
-        // TODO: Implement actual memory usage calculation
-        64 * 1024 * 1024 // 64MB placeholder
+    async fn get_memory_usage() -> u64 {
+        // Read memory usage from /proc/self/status on Linux
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(status) = tokio::fs::read_to_string("/proc/self/status").await {
+                for line in status.lines() {
+                    if line.starts_with("VmRSS:") {
+                        if let Some(value) = line.split_whitespace().nth(1) {
+                            if let Ok(kb) = value.parse::<u64>() {
+                                return kb * 1024; // Convert KB to bytes
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Fallback for non-Linux or if reading fails
+        64 * 1024 * 1024 // 64MB default
     }
 
-    fn get_cpu_usage() -> f32 {
-        // TODO: Implement actual CPU usage calculation
-        15.5 // 15.5% placeholder
+    async fn get_cpu_usage() -> f32 {
+        // Read CPU usage from /proc/stat on Linux
+        #[cfg(target_os = "linux")]
+        {
+            if let Ok(stat) = tokio::fs::read_to_string("/proc/self/stat").await {
+                let parts: Vec<&str> = stat.split_whitespace().collect();
+                if parts.len() > 14 {
+                    if let (Ok(utime), Ok(stime)) = (parts[13].parse::<f32>(), parts[14].parse::<f32>()) {
+                        let total_time = utime + stime;
+                        let uptime = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_secs() as f32;
+                        
+                        // CPU usage as percentage
+                        return (total_time / uptime / 100.0).min(100.0);
+                    }
+                }
+            }
+        }
+        
+        // Fallback
+        5.0 // 5% default
     }
 
     async fn get_services_status() -> HashMap<String, bool> {
-        // TODO: Implement actual service health checks
         let mut status = HashMap::new();
-        status.insert("backup_engine".to_string(), true);
-        status.insert("storage_hal".to_string(), true);
-        status.insert("compression_engine".to_string(), true);
-        status.insert("encryption_service".to_string(), false);
-        status.insert("ml_optimizer".to_string(), true);
+        let services = vec![
+            ("backup_engine", "http://backup-engine:8080/actuator/health"),
+            ("storage_hal", "http://storage-hal:8080/health"),
+            ("compression_engine", "http://compression-engine:8080/health"),
+            ("encryption_service", "http://encryption-service:3000/health"),
+            ("ml_optimizer", "http://ml-optimizer:8000/health"),
+            ("sync_coordinator", "http://sync-coordinator:3001/health"),
+            ("deduplication_service", "http://deduplication-service:8001/health"),
+            ("index_service", "http://index-service:8081/actuator/health"),
+            ("analytics_engine", "http://analytics-engine:8082/health"),
+        ];
+        
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(2))
+            .build()
+            .unwrap();
+        
+        for (service_name, url) in services {
+            let is_healthy = client.get(url)
+                .send()
+                .await
+                .map(|resp| resp.status().is_success())
+                .unwrap_or(false);
+            
+            status.insert(service_name.to_string(), is_healthy);
+        }
+        
         status
     }
 

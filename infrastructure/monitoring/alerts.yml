@@ -1,0 +1,188 @@
+groups:
+  - name: corestate_alerts
+    interval: 30s
+    rules:
+      # Service Health Alerts
+      - alert: ServiceDown
+        expr: up{job=~"backup-engine|storage-hal|compression-engine|encryption-service|ml-optimizer|sync-coordinator|deduplication-service|index-service|analytics-engine"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: '{{ $labels.service }}'
+        annotations:
+          summary: "Service {{ $labels.service }} is down"
+          description: "{{ $labels.service }} has been down for more than 2 minutes."
+
+      # High Error Rate
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: '{{ $labels.service }}'
+        annotations:
+          summary: "High error rate on {{ $labels.service }}"
+          description: "Error rate is {{ $value | humanizePercentage }} on {{ $labels.service }}"
+
+      # High Response Time
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+          component: '{{ $labels.service }}'
+        annotations:
+          summary: "High response time on {{ $labels.service }}"
+          description: "P95 response time is {{ $value }}s on {{ $labels.service }}"
+
+      # Memory Usage
+      - alert: HighMemoryUsage
+        expr: (container_memory_usage_bytes / container_spec_memory_limit_bytes) * 100 > 90
+        for: 5m
+        labels:
+          severity: warning
+          component: '{{ $labels.container }}'
+        annotations:
+          summary: "High memory usage on {{ $labels.container }}"
+          description: "Memory usage is {{ $value | humanize }}% on {{ $labels.container }}"
+
+      # CPU Usage
+      - alert: HighCPUUsage
+        expr: rate(container_cpu_usage_seconds_total[5m]) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+          component: '{{ $labels.container }}'
+        annotations:
+          summary: "High CPU usage on {{ $labels.container }}"
+          description: "CPU usage is {{ $value | humanize }}% on {{ $labels.container }}"
+
+      # Disk Usage
+      - alert: HighDiskUsage
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) * 100 < 10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Only {{ $value | humanize }}% disk space remaining on {{ $labels.instance }}"
+
+      # Backup Job Failures
+      - alert: BackupJobFailureRate
+        expr: rate(backup_jobs_failed_total[1h]) > 0.1
+        for: 15m
+        labels:
+          severity: critical
+          component: backup-engine
+        annotations:
+          summary: "High backup job failure rate"
+          description: "Backup job failure rate is {{ $value | humanizePercentage }} over the last hour"
+
+      # Deduplication Ratio
+      - alert: LowDeduplicationRatio
+        expr: deduplication_ratio < 0.3
+        for: 1h
+        labels:
+          severity: warning
+          component: deduplication-service
+        annotations:
+          summary: "Low deduplication ratio"
+          description: "Deduplication ratio has dropped to {{ $value | humanizePercentage }}"
+
+      # Compression Ratio
+      - alert: LowCompressionRatio
+        expr: compression_ratio < 0.5
+        for: 1h
+        labels:
+          severity: warning
+          component: compression-engine
+        annotations:
+          summary: "Low compression ratio"
+          description: "Compression ratio has dropped to {{ $value | humanizePercentage }}"
+
+      # Database Alerts
+      - alert: DatabaseConnectionPoolExhausted
+        expr: hikaricp_connections_active / hikaricp_connections_max > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: "Connection pool usage is {{ $value | humanizePercentage }} on {{ $labels.pool }}"
+
+      # Redis Alerts
+      - alert: RedisHighMemoryUsage
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+          component: redis
+        annotations:
+          summary: "Redis memory usage high"
+          description: "Redis memory usage is {{ $value | humanizePercentage }}"
+
+      # Kafka Alerts
+      - alert: KafkaConsumerLag
+        expr: kafka_consumergroup_lag > 1000
+        for: 10m
+        labels:
+          severity: warning
+          component: kafka
+        annotations:
+          summary: "High Kafka consumer lag"
+          description: "Consumer lag is {{ $value }} messages on {{ $labels.topic }}"
+
+      # Elasticsearch Alerts
+      - alert: ElasticsearchClusterYellow
+        expr: elasticsearch_cluster_health_status{color="yellow"} == 1
+        for: 10m
+        labels:
+          severity: warning
+          component: elasticsearch
+        annotations:
+          summary: "Elasticsearch cluster status yellow"
+          description: "Elasticsearch cluster {{ $labels.cluster }} is in yellow state"
+
+      - alert: ElasticsearchClusterRed
+        expr: elasticsearch_cluster_health_status{color="red"} == 1
+        for: 5m
+        labels:
+          severity: critical
+          component: elasticsearch
+        annotations:
+          summary: "Elasticsearch cluster status red"
+          description: "Elasticsearch cluster {{ $labels.cluster }} is in red state"
+
+      # ML Model Performance
+      - alert: MLModelPredictionAccuracyLow
+        expr: ml_model_accuracy < 0.7
+        for: 1h
+        labels:
+          severity: warning
+          component: ml-optimizer
+        annotations:
+          summary: "ML model prediction accuracy low"
+          description: "ML model accuracy has dropped to {{ $value | humanizePercentage }}"
+
+      # Storage Alerts
+      - alert: StorageReplicationFailed
+        expr: rate(storage_replication_failures_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          component: storage-hal
+        annotations:
+          summary: "Storage replication failures detected"
+          description: "Storage replication is failing at {{ $value }} failures/sec"
+
+      # Sync Coordinator Alerts
+      - alert: SyncConflictRate
+        expr: rate(sync_conflicts_total[5m]) > 0.01
+        for: 10m
+        labels:
+          severity: warning
+          component: sync-coordinator
+        annotations:
+          summary: "High sync conflict rate"
+          description: "Sync conflicts occurring at {{ $value }} conflicts/sec"
