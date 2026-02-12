@@ -1,0 +1,172 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: analytics-engine
+  namespace: corestate
+  labels:
+    app: analytics-engine
+    component: analytics
+    version: "2.0.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: analytics-engine
+  template:
+    metadata:
+      labels:
+        app: analytics-engine
+        component: analytics
+        version: "2.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8082"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: analytics-engine
+        image: ghcr.io/overspend1/corestate-analytics-engine:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 8082
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        env:
+        - name: KAFKA_BOOTSTRAP_SERVERS
+          value: "kafka:9092"
+        - name: KAFKA_TOPIC
+          value: "backup-events"
+        - name: INFLUXDB_URL
+          valueFrom:
+            configMapKeyRef:
+              name: analytics-config
+              key: influxdb.url
+        - name: INFLUXDB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: influxdb-credentials
+              key: token
+        - name: INFLUXDB_ORG
+          value: "corestate"
+        - name: INFLUXDB_BUCKET
+          value: "backup-analytics"
+        - name: PARQUET_OUTPUT_PATH
+          value: "/data/parquet"
+        - name: SPARK_MASTER
+          value: "local[*]"
+        - name: JAVA_OPTS
+          value: "-Xmx2g -Xms512m"
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8082
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+        volumeMounts:
+        - name: parquet-data
+          mountPath: /data/parquet
+        - name: config
+          mountPath: /app/conf/application.conf
+          subPath: application.conf
+      volumes:
+      - name: parquet-data
+        persistentVolumeClaim:
+          claimName: analytics-parquet-pvc
+      - name: config
+        configMap:
+          name: analytics-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: analytics-engine
+  namespace: corestate
+  labels:
+    app: analytics-engine
+    component: analytics
+spec:
+  type: ClusterIP
+  ports:
+  - port: 8082
+    targetPort: 8082
+    protocol: TCP
+    name: http
+  - port: 9090
+    targetPort: 9090
+    protocol: TCP
+    name: metrics
+  selector:
+    app: analytics-engine
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: analytics-parquet-pvc
+  namespace: corestate
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: analytics-config
+  namespace: corestate
+data:
+  influxdb.url: "http://influxdb:8086"
+  application.conf: |
+    akka {
+      loglevel = "INFO"
+      actor {
+        provider = "local"
+      }
+    }
+    
+    http {
+      interface = "0.0.0.0"
+      port = 8082
+    }
+    
+    spark {
+      app.name = "CoreState Analytics"
+      master = "local[*]"
+    }
+    
+    kafka {
+      bootstrap.servers = "kafka:9092"
+      topic = "backup-events"
+      group.id = "analytics-engine"
+    }
+    
+    influxdb {
+      url = "http://influxdb:8086"
+      org = "corestate"
+      bucket = "backup-analytics"
+    }
+    
+    parquet {
+      output.path = "/data/parquet"
+    }

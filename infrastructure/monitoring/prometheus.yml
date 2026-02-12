@@ -1,0 +1,130 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'corestate-production'
+    environment: 'production'
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+scrape_configs:
+  # Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # CoreState Microservices
+  - job_name: 'backup-engine'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['backup-engine:8080']
+        labels:
+          service: 'backup-engine'
+          component: 'orchestration'
+
+  - job_name: 'index-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['index-service:8081']
+        labels:
+          service: 'index-service'
+          component: 'search'
+
+  - job_name: 'analytics-engine'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['analytics-engine:9090']
+        labels:
+          service: 'analytics-engine'
+          component: 'analytics'
+
+  - job_name: 'ml-optimizer'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['ml-optimizer:8000']
+        labels:
+          service: 'ml-optimizer'
+          component: 'ml'
+
+  - job_name: 'storage-hal'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['storage-hal:8080']
+        labels:
+          service: 'storage-hal'
+          component: 'storage'
+
+  - job_name: 'compression-engine'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['compression-engine:8080']
+        labels:
+          service: 'compression-engine'
+          component: 'storage'
+
+  - job_name: 'encryption-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['encryption-service:3000']
+        labels:
+          service: 'encryption-service'
+          component: 'security'
+
+  - job_name: 'sync-coordinator'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['sync-coordinator:3001']
+        labels:
+          service: 'sync-coordinator'
+          component: 'sync'
+
+  - job_name: 'deduplication-service'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['deduplication-service:8001']
+        labels:
+          service: 'deduplication-service'
+          component: 'storage'
+
+  # Infrastructure
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+        labels:
+          service: 'postgres'
+          component: 'database'
+
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          service: 'redis'
+          component: 'cache'
+
+  - job_name: 'elasticsearch'
+    static_configs:
+      - targets: ['elasticsearch-exporter:9114']
+        labels:
+          service: 'elasticsearch'
+          component: 'search'
+
+  - job_name: 'kafka'
+    static_configs:
+      - targets: ['kafka-exporter:9308']
+        labels:
+          service: 'kafka'
+          component: 'messaging'
+
+  # Node Exporter for system metrics
+  - job_name: 'node'
+    static_configs:
+      - targets: ['node-exporter:9100']
+        labels:
+          component: 'infrastructure'

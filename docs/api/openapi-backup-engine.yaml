@@ -1,0 +1,393 @@
+openapi: 3.0.3
+info:
+  title: CoreState Backup Engine API
+  description: |
+    Backup orchestration and management API for CoreState v2.0.
+    Handles backup job creation, monitoring, and restoration.
+  version: 2.0.0
+  contact:
+    name: Wiktor (overspend1)
+    url: https://github.com/overspend1/corestate
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: https://api.corestate.io
+    description: Production
+
+tags:
+  - name: Backups
+    description: Backup job management
+  - name: Restore
+    description: File restoration operations
+  - name: Health
+    description: Service health and metrics
+
+paths:
+  /api/backups:
+    post:
+      tags:
+        - Backups
+      summary: Create a new backup job
+      description: Creates and schedules a new backup job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBackupRequest'
+      responses:
+        '201':
+          description: Backup job created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupJobResponse'
+        '400':
+          description: Invalid request
+        '500':
+          description: Server error
+
+    get:
+      tags:
+        - Backups
+      summary: List backup jobs
+      description: Retrieve a list of backup jobs with optional filtering
+      parameters:
+        - name: deviceId
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, RUNNING, COMPLETED, FAILED, PAUSED, CANCELLED]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: List of backup jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BackupJobResponse'
+
+  /api/backups/{jobId}:
+    get:
+      tags:
+        - Backups
+      summary: Get backup job details
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Backup job details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BackupJobResponse'
+        '404':
+          description: Job not found
+
+    delete:
+      tags:
+        - Backups
+      summary: Cancel backup job
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Job cancelled successfully
+        '404':
+          description: Job not found
+
+  /api/backups/{jobId}/pause:
+    post:
+      tags:
+        - Backups
+      summary: Pause backup job
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job paused successfully
+        '404':
+          description: Job not found
+
+  /api/backups/{jobId}/resume:
+    post:
+      tags:
+        - Backups
+      summary: Resume backup job
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Job resumed successfully
+        '404':
+          description: Job not found
+
+  /api/backups/{jobId}/progress:
+    get:
+      tags:
+        - Backups
+      summary: Get backup progress (Server-Sent Events)
+      description: Stream real-time backup progress updates
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Progress stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/BackupProgress'
+
+  /api/restore:
+    post:
+      tags:
+        - Restore
+      summary: Restore files from backup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RestoreRequest'
+      responses:
+        '201':
+          description: Restore job created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RestoreJobResponse'
+
+  /actuator/health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: UP
+
+  /actuator/prometheus:
+    get:
+      tags:
+        - Health
+      summary: Prometheus metrics
+      responses:
+        '200':
+          description: Metrics in Prometheus format
+          content:
+            text/plain:
+              schema:
+                type: string
+
+components:
+  schemas:
+    CreateBackupRequest:
+      type: object
+      required:
+        - deviceId
+        - paths
+      properties:
+        deviceId:
+          type: string
+          description: Unique device identifier
+        paths:
+          type: array
+          items:
+            type: string
+          description: List of paths to backup
+        options:
+          $ref: '#/components/schemas/BackupOptions'
+
+    BackupOptions:
+      type: object
+      properties:
+        compressionAlgorithm:
+          type: string
+          enum: [zstd, lz4, gzip, brotli, none]
+          default: zstd
+        compressionLevel:
+          type: integer
+          minimum: 1
+          maximum: 22
+          default: 3
+        encryptionEnabled:
+          type: boolean
+          default: true
+        deduplicationEnabled:
+          type: boolean
+          default: true
+        retentionDays:
+          type: integer
+          minimum: 1
+          default: 30
+        schedule:
+          type: string
+          description: Cron expression for scheduled backups
+
+    BackupJobResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        deviceId:
+          type: string
+        paths:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [PENDING, RUNNING, COMPLETED, FAILED, PAUSED, CANCELLED]
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        createdAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+        options:
+          $ref: '#/components/schemas/BackupOptions'
+        statistics:
+          $ref: '#/components/schemas/BackupStatistics'
+
+    BackupStatistics:
+      type: object
+      properties:
+        totalFiles:
+          type: integer
+        processedFiles:
+          type: integer
+        totalBytes:
+          type: integer
+          format: int64
+        processedBytes:
+          type: integer
+          format: int64
+        deduplicatedBytes:
+          type: integer
+          format: int64
+        compressedBytes:
+          type: integer
+          format: int64
+
+    BackupProgress:
+      type: object
+      properties:
+        jobId:
+          type: string
+        progress:
+          type: integer
+          minimum: 0
+          maximum: 100
+        currentFile:
+          type: string
+        processedFiles:
+          type: integer
+        totalFiles:
+          type: integer
+        processedBytes:
+          type: integer
+          format: int64
+        totalBytes:
+          type: integer
+          format: int64
+        speed:
+          type: integer
+          format: int64
+          description: Bytes per second
+        eta:
+          type: string
+          format: date-time
+        stage:
+          type: string
+          enum: [SCANNING, PROCESSING, UPLOADING, FINALIZING]
+
+    RestoreRequest:
+      type: object
+      required:
+        - backupId
+        - targetPath
+      properties:
+        backupId:
+          type: string
+        targetPath:
+          type: string
+        files:
+          type: array
+          items:
+            type: string
+          description: Specific files to restore (wildcard * for all)
+        overwrite:
+          type: boolean
+          default: false
+
+    RestoreJobResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        backupId:
+          type: string
+        targetPath:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, RUNNING, COMPLETED, FAILED]
+        progress:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time

@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sync-coordinator
+  namespace: corestate
+  labels:
+    app: sync-coordinator
+    component: sync
+    version: "2.0.0"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: sync-coordinator
+  template:
+    metadata:
+      labels:
+        app: sync-coordinator
+        component: sync
+        version: "2.0.0"
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3001"
+        prometheus.io/path: "/metrics"
+    spec:
+      containers:
+      - name: sync-coordinator
+        image: ghcr.io/overspend1/corestate-sync-coordinator:latest
+        imagePullPolicy: Always
+        ports:
+        - name: http
+          containerPort: 3001
+          protocol: TCP
+        - name: websocket
+          containerPort: 4444
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3001"
+        - name: WEBSOCKET_PORT
+          value: "4444"
+        - name: REDIS_URL
+          value: "redis://redis:6379"
+        - name: LOG_LEVEL
+          value: "info"
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3001
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3001
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sync-coordinator
+  namespace: corestate
+  labels:
+    app: sync-coordinator
+    component: sync
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3001
+    targetPort: 3001
+    protocol: TCP
+    name: http
+  - port: 4444
+    targetPort: 4444
+    protocol: TCP
+    name: websocket
+  selector:
+    app: sync-coordinator
